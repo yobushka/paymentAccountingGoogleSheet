@@ -39,7 +39,8 @@ function onEdit(e) {
     const sh = e && e.range && e.range.getSheet();
     if (!sh) return;
     const name = sh.getName();
-  if (name === 'Платежи' || name === 'Семьи' || name === 'Баланс') refreshBalanceFormulas_();
+    if (name === 'Платежи' || name === 'Семьи' || name === 'Баланс') refreshBalanceFormulas_();
+    if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация') refreshDetailSheet_();
     // Auto-generate IDs when user starts filling key fields
     if (name === 'Семьи') maybeAutoIdRow_(sh, e.range.getRow(), 'family_id', 'F', 3, ['Ребёнок ФИО']);
     else if (name === 'Сборы') maybeAutoIdRow_(sh, e.range.getRow(), 'collection_id', 'C', 3, ['Название сбора']);
@@ -47,9 +48,7 @@ function onEdit(e) {
   } catch (err) {
     // silent guard
   }
-}
-
-/** =========================
+}/** =========================
  *  INITIALIZATION / STRUCTURE
  *  ========================= */
 function init() {
@@ -99,12 +98,13 @@ function init() {
  *  ========================= */
 function styleWorkbook_() {
   const ss = SpreadsheetApp.getActive();
-  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс'];
+  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация'];
   names.forEach(n => {
     const sh = ss.getSheetByName(n);
     if (!sh) return;
     styleSheetHeader_(sh);
     if (n === 'Баланс') styleBalanceSheet_(sh);
+    else if (n === 'Детализация') styleDetailSheet_(sh);
     else if (n === 'Платежи') stylePaymentsSheet_(sh);
     else if (n === 'Сборы') styleCollectionsSheet_(sh);
     else if (n === 'Семьи') styleFamiliesSheet_(sh);
@@ -306,6 +306,27 @@ function styleParticipationSheet_(sh) {
   }
 }
 
+function styleDetailSheet_(sh) {
+  sh.setFrozenColumns(2);
+  const map = getHeaderMap_(sh);
+  const lastRow = Math.max(sh.getLastRow(), 2);
+  // Number formats
+  if (map['Оплачено']) sh.getRange(2, map['Оплачено'], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right');
+  if (map['Начислено']) sh.getRange(2, map['Начислено'], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right');
+  if (map['Разность (±)']) sh.getRange(2, map['Разность (±)'], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right');
+  // IDs center
+  if (map['family_id']) sh.getRange(2, map['family_id'], lastRow-1, 1).setHorizontalAlignment('center');
+  if (map['collection_id']) sh.getRange(2, map['collection_id'], lastRow-1, 1).setHorizontalAlignment('center');
+  // Conditional formatting for difference: positive green, negative red
+  if (map['Разность (±)'] && lastRow > 1) {
+    const rules = sh.getConditionalFormatRules();
+    const rng = sh.getRange(2, map['Разность (±)'], lastRow-1, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground('#e6f4ea').setRanges([rng]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0).setBackground('#fce8e6').setRanges([rng]).build());
+    sh.setConditionalFormatRules(rules);
+  }
+}
+
 function getSheetsSpec() {
   return [
     {
@@ -357,6 +378,14 @@ function getSheetsSpec() {
   'Переплата (текущая)','Оплачено всего','Начислено всего','Задолженность'
       ],
       colWidths: [120,260,140,140,120,130]
+    },
+    {
+      name: 'Детализация',
+      headers: [
+        'family_id','Имя ребёнка','collection_id','Название сбора',
+        'Оплачено','Начислено','Разность (±)','Режим'
+      ],
+      colWidths: [120,200,120,200,120,120,120,150]
     },
     {
       name: 'DynCalc',
@@ -594,6 +623,9 @@ function setupBalanceExamples() {
   refreshBalanceFormulas_();
 
   sh.getRange('H3').setValue('Примечание: даты платёжек используются только для справки (фильтры/отчёты). Расчёты мгновенные.');
+  
+  // Setup detail sheet
+  setupDetailSheet_();
 }
 
 function refreshBalanceFormulas_() {
@@ -626,6 +658,40 @@ function refreshBalanceFormulas_() {
   shBal.getRange(2, 4, rows, 1).setFormulas(formulasD);
   shBal.getRange(2, 5, rows, 1).setFormulas(formulasE);
   shBal.getRange(2, 6, rows, 1).setFormulas(formulasF);
+}
+
+function setupDetailSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Детализация');
+  if (!sh) return;
+  
+  // Clear old data
+  const lastRow = sh.getLastRow();
+  if (lastRow > 1) sh.getRange(2, 1, lastRow-1, sh.getLastColumn()).clearContent();
+  
+  // Selector for status filter
+  sh.getRange('J1').setValue('Фильтр');
+  sh.getRange('K1').setValue('ALL');
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
+  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
+  
+  // Dynamic formulas starting from A2
+  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1))`);
+  
+  sh.getRange('J3').setValue('Автообновление при изменении данных. Строки генерируются динамически.');
+}
+
+function refreshDetailSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Детализация');
+  if (!sh) return;
+  
+  // Trigger recalculation by touching the formula cell
+  const current = sh.getRange('A2').getFormula();
+  if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
+    sh.getRange('A2').setFormula(current);
+  }
 }
 
 /** =========================
@@ -907,6 +973,84 @@ function toISO_(d) {
 // LABEL_TO_ID("Имя (F001)") -> "F001" ; LABEL_TO_ID("F001")->"F001"
 function LABEL_TO_ID(value) {
   return getIdFromLabelish_(value);
+}
+
+// Debug helper: shows detailed calculation for a collection and family
+function DEBUG_COLLECTION_ACCRUAL(collectionId, familyId) {
+  const ss = SpreadsheetApp.getActive();
+  const shC = ss.getSheetByName('Сборы');
+  const shP = ss.getSheetByName('Платежи');
+  const shF = ss.getSheetByName('Семьи');
+  const shU = ss.getSheetByName('Участие');
+  
+  const mapC = getHeaderMap_(shC);
+  const mapP = getHeaderMap_(shP);
+  const mapF = getHeaderMap_(shF);
+  const mapU = getHeaderMap_(shU);
+  
+  // Find collection
+  const cRows = shC.getLastRow();
+  let collectionData = null;
+  if (cRows >= 2) {
+    const C = shC.getRange(2, 1, cRows - 1, shC.getLastColumn()).getValues();
+    const ch = shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0];
+    const ci={}; ch.forEach((h,idx)=>ci[h]=idx);
+    for (const row of C) {
+      if (String(row[ci['collection_id']]||'').trim() === collectionId) {
+        collectionData = {
+          id: collectionId,
+          status: String(row[ci['Статус']]||'').trim(),
+          accrual: String(row[ci['Начисление']]||'').trim(),
+          paramT: Number(row[ci['Параметр суммы']]||0),
+          fixedX: Number(row[ci['Фиксированный x']]||0)
+        };
+        break;
+      }
+    }
+  }
+  
+  if (!collectionData) return 'Collection not found: ' + collectionId;
+  
+  // Get payments for this collection
+  const payments = new Map();
+  const pRows = shP.getLastRow();
+  if (pRows >= 2) {
+    const P = shP.getRange(2, 1, pRows - 1, shP.getLastColumn()).getValues();
+    const ph = shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0];
+    const pi={}; ph.forEach((h,idx)=>pi[h]=idx);
+    P.forEach(r=>{
+      const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
+      const sum = Number(r[pi['Сумма']]||0);
+      if (col === collectionId && fam && sum > 0) {
+        payments.set(fam, (payments.get(fam)||0) + sum);
+      }
+    });
+  }
+  
+  const paymentArray = Array.from(payments.values());
+  const familyPayment = payments.get(familyId) || 0;
+  
+  let result = `Collection: ${collectionId}\n`;
+  result += `Mode: ${collectionData.accrual}\n`;
+  result += `Target T: ${collectionData.paramT}\n`;
+  result += `Fixed X: ${collectionData.fixedX}\n`;
+  result += `Status: ${collectionData.status}\n`;
+  result += `All payments: [${paymentArray.join(', ')}]\n`;
+  result += `Family ${familyId} payment: ${familyPayment}\n`;
+  
+  if (collectionData.accrual === 'dynamic_by_payers') {
+    const x = collectionData.fixedX > 0 ? collectionData.fixedX : DYN_CAP_(collectionData.paramT, paymentArray);
+    result += `Calculated x: ${x}\n`;
+    result += `Family accrual: min(${familyPayment}, ${x}) = ${Math.min(familyPayment, x)}\n`;
+    
+    // Verify total
+    let total = 0;
+    payments.forEach((pay) => total += Math.min(pay, x));
+    result += `Total distributed: ${total}\n`;
+  }
+  
+  return result;
 }
 
 // Sum of all payments by a family (all collections)
@@ -1195,15 +1339,25 @@ function DYN_CAP_(T, payments) {
   const sum = arr.reduce((a,b)=>a+b,0);
   const target = Math.min(T, sum);
   if (target <= 0) return 0;
+  
+  // Debug logging
+  Logger.log(`DYN_CAP_: T=${T}, payments=[${arr.join(',')}], target=${target}`);
+  
   let cumsum = 0;
   for (let k = 0; k < n; k++) {
     const next = arr[k];
     const remain = n - k;
     const candidate = (target - cumsum) / remain;
-    if (candidate <= next) return round6_(candidate);
+    Logger.log(`Step ${k}: next=${next}, remain=${remain}, candidate=${candidate}, cumsum=${cumsum}`);
+    if (candidate <= next) {
+      Logger.log(`Found x=${candidate}`);
+      return round6_(candidate);
+    }
     cumsum += next;
   }
-  return round6_((target - (cumsum - arr[n-1])) / 1);
+  const final = round6_((target - (cumsum - arr[n-1])) / 1);
+  Logger.log(`Final x=${final}`);
+  return final;
 }
 
 /** =========================
@@ -1216,6 +1370,241 @@ function getIdFromLabelish_(v) {
   return m ? m[1] : s; // if label "Name (ID)" -> ID; else assume it's already ID
 }
 function flatten_(arr){ const out=[];(arr||[]).forEach(r=>Array.isArray(r)?r.forEach(c=>out.push(c)):out.push(r));return out; }
+// Debug what's being calculated in Balance
+function DEBUG_BALANCE_ACCRUAL(familyId) {
+  const ss = SpreadsheetApp.getActive();
+  const shBal = ss.getSheetByName('Баланс');
+  const selector = String(shBal.getRange('I1').getValue() || 'ALL').toUpperCase();
+  
+  let result = `Family: ${familyId}\n`;
+  result += `Selector: ${selector}\n`;
+  result += `ACCRUED_FAMILY result: ${ACCRUED_FAMILY(familyId, selector)}\n`;
+  result += `Breakdown:\n`;
+  
+  const breakdown = ACCRUED_BREAKDOWN(familyId, selector);
+  for (let i = 1; i < breakdown.length; i++) {
+    result += `  ${breakdown[i][0]}: ${breakdown[i][1]}\n`;
+  }
+  
+  return result;
+}
+
+// Test function for debugging
+function TEST_DYN_CAP() {
+  const result1 = DYN_CAP_(500, [2000, 1333]);
+  Logger.log(`Test 1: DYN_CAP_(500, [2000, 1333]) = ${result1}`);
+  
+  const result2 = DYN_CAP_(500, [1333, 2000]);
+  Logger.log(`Test 2: DYN_CAP_(500, [1333, 2000]) = ${result2}`);
+  
+  return `Result1: ${result1}, Result2: ${result2}`;
+}
+
 function round6_(x){ return Math.round((x + Number.EPSILON) * 1e6) / 1e6; }
 function round2_(x){ return Math.round((x + Number.EPSILON) * 100) / 100; }
 function toastErr_(msg){ SpreadsheetApp.getActive().toast(msg, 'Funds (error)', 5); }
+
+/** Generate detailed payment/accrual breakdown for all families and collections */
+function GENERATE_DETAIL_BREAKDOWN(statusFilter) {
+  const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
+  const ss = SpreadsheetApp.getActive();
+  const shF = ss.getSheetByName('Семьи');
+  const shC = ss.getSheetByName('Сборы');
+  const shU = ss.getSheetByName('Участие');
+  const shP = ss.getSheetByName('Платежи');
+
+  const mapF = getHeaderMap_(shF);
+  const mapC = getHeaderMap_(shC);
+  const mapU = getHeaderMap_(shU);
+  const mapP = getHeaderMap_(shP);
+
+  // Get all families
+  const families = new Map(); // id -> name
+  const famRows = shF.getLastRow();
+  if (famRows >= 2) {
+    const vals = shF.getRange(2, 1, famRows - 1, shF.getLastColumn()).getValues();
+    const headers = shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0];
+    const i = {}; headers.forEach((h,idx)=>i[h]=idx);
+    vals.forEach(r=>{
+      const id = String(r[i['family_id']]||'').trim();
+      const name = String(r[i['Ребёнок ФИО']]||'').trim();
+      if (id) families.set(id, name);
+    });
+  }
+
+  // Get all collections
+  const collections = new Map(); // id -> {name, status, accrual}
+  const cRows = shC.getLastRow();
+  if (cRows >= 2) {
+    const C = shC.getRange(2, 1, cRows - 1, shC.getLastColumn()).getValues();
+    const ch = shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0];
+    const ci={}; ch.forEach((h,idx)=>ci[h]=idx);
+    C.forEach(row=>{
+      const colId = String(row[ci['collection_id']]||'').trim();
+      const name = String(row[ci['Название сбора']]||'').trim();
+      const status = String(row[ci['Статус']]||'').trim();
+      const accrual = String(row[ci['Начисление']]||'').trim();
+      if (colId && (!onlyOpen || status === 'Открыт')) {
+        collections.set(colId, {name, status, accrual});
+      }
+    });
+  }
+
+  // Get payments by family/collection
+  const payments = new Map(); // "famId|colId" -> amount
+  const pRows = shP.getLastRow();
+  if (pRows >= 2) {
+    const P = shP.getRange(2, 1, pRows - 1, shP.getLastColumn()).getValues();
+    const ph = shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0];
+    const pi={}; ph.forEach((h,idx)=>pi[h]=idx);
+    P.forEach(r=>{
+      const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
+      const sum = Number(r[pi['Сумма']]||0);
+      if (col && fam && sum > 0) {
+        const key = `${fam}|${col}`;
+        payments.set(key, (payments.get(key)||0) + sum);
+      }
+    });
+  }
+
+  const result = [];
+  
+  // Generate rows for each family/collection combination where there's activity
+  families.forEach((famName, famId) => {
+    collections.forEach((colData, colId) => {
+      const key = `${famId}|${colId}`;
+      const paid = payments.get(key) || 0;
+      
+      // Calculate accrual for this specific combination
+      const accrued = getSingleAccrual_(famId, colId, statusFilter);
+      
+      // Include if there's payment or accrual
+      if (paid > 0 || accrued > 0) {
+        const diff = paid - accrued;
+        result.push([
+          famId, famName, colId, colData.name,
+          round2_(paid), round2_(accrued), round2_(diff), colData.accrual
+        ]);
+      }
+    });
+  });
+
+  return result.length ? result : [['','','','','','','','']];
+}
+
+/** Calculate accrual for a specific family/collection pair */
+function getSingleAccrual_(familyId, collectionId, statusFilter) {
+  const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
+  const ss = SpreadsheetApp.getActive();
+  const shF = ss.getSheetByName('Семьи');
+  const shC = ss.getSheetByName('Сборы');
+  const shU = ss.getSheetByName('Участие');
+  const shP = ss.getSheetByName('Платежи');
+
+  const mapF = getHeaderMap_(shF);
+  const mapC = getHeaderMap_(shC);
+  const mapU = getHeaderMap_(shU);
+  const mapP = getHeaderMap_(shP);
+
+  // Get collection data
+  let collectionData = null;
+  const cRows = shC.getLastRow();
+  if (cRows >= 2) {
+    const C = shC.getRange(2, 1, cRows - 1, shC.getLastColumn()).getValues();
+    const ch = shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0];
+    const ci={}; ch.forEach((h,idx)=>ci[h]=idx);
+    C.forEach(row=>{
+      const colId = String(row[ci['collection_id']]||'').trim();
+      if (colId === collectionId) {
+        collectionData = {
+          status: String(row[ci['Статус']]||'').trim(),
+          accrual: String(row[ci['Начисление']]||'').trim(),
+          paramT: Number(row[ci['Параметр суммы']]||0),
+          fixedX: Number(row[ci['Фиксированный x']]||0)
+        };
+      }
+    });
+  }
+  
+  if (!collectionData || (onlyOpen && collectionData.status !== 'Открыт')) return 0;
+
+  // Get active families and participation for this collection
+  const activeFam = new Set();
+  const famRows = shF.getLastRow();
+  if (famRows >= 2) {
+    const vals = shF.getRange(2, 1, famRows - 1, shF.getLastColumn()).getValues();
+    const headers = shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0];
+    const i = {}; headers.forEach((h,idx)=>i[h]=idx);
+    vals.forEach(r=>{
+      const id = String(r[i['family_id']]||'').trim();
+      const act = String(r[i['Активен']]||'').trim()==='Да';
+      if (id && act) activeFam.add(id);
+    });
+  }
+
+  // Participation for this collection
+  const partInclude = new Set();
+  const partExclude = new Set();
+  let hasInclude = false;
+  const uRows = shU.getLastRow();
+  if (uRows >= 2) {
+    const U = shU.getRange(2, 1, uRows - 1, shU.getLastColumn()).getValues();
+    const uh = shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0];
+    const ui={}; uh.forEach((h,idx)=>ui[h]=idx);
+    U.forEach(r=>{
+      const col = getIdFromLabelish_(String(r[ui['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[ui['family_id (label)']]||''));
+      const st = String(r[ui['Статус']]||'').trim();
+      if (col === collectionId && fam) {
+        if (st === 'Участвует') { hasInclude = true; partInclude.add(fam); }
+        else if (st === 'Не участвует') { partExclude.add(fam); }
+      }
+    });
+  }
+
+  // Resolve participants
+  const participants = new Set();
+  if (hasInclude) partInclude.forEach(f=>participants.add(f));
+  else activeFam.forEach(f=>participants.add(f));
+  partExclude.forEach(f=>participants.delete(f));
+
+  // Payments for this collection
+  const famPays = new Map();
+  const pRows = shP.getLastRow();
+  if (pRows >= 2) {
+    const P = shP.getRange(2, 1, pRows - 1, shP.getLastColumn()).getValues();
+    const ph = shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0];
+    const pi={}; ph.forEach((h,idx)=>pi[h]=idx);
+    P.forEach(r=>{
+      const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
+      const sum = Number(r[pi['Сумма']]||0);
+      if (col === collectionId && fam && sum > 0) {
+        famPays.set(fam, (famPays.get(fam)||0) + sum);
+      }
+    });
+  }
+
+  // Fallback: use payers as participants if none resolved
+  if (participants.size === 0) famPays.forEach((_, fid)=>participants.add(fid));
+
+  const n = participants.size;
+  const Pi = famPays.get(familyId) || 0;
+
+  let accrued = 0;
+  if (collectionData.accrual === 'static_per_child') {
+    accrued = participants.has(familyId) ? collectionData.paramT : 0;
+  } else if (collectionData.accrual === 'shared_total_all') {
+    if (n > 0 && participants.has(familyId)) accrued = collectionData.paramT / n;
+  } else if (collectionData.accrual === 'dynamic_by_payers') {
+    if (participants.has(familyId) && n > 0) {
+      const payments = [];
+      famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) payments.push(sum); });
+      const x = collectionData.fixedX > 0 ? collectionData.fixedX : DYN_CAP_(collectionData.paramT, payments);
+      accrued = Math.min(Pi, x);
+    }
+  }
+  
+  return round2_(accrued);
+}
