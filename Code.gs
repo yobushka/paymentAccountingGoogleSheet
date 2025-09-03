@@ -39,7 +39,7 @@ function onEdit(e) {
     const sh = e && e.range && e.range.getSheet();
     if (!sh) return;
     const name = sh.getName();
-    if (name === 'Платежи' || name === 'Семьи') refreshBalanceFormulas_();
+  if (name === 'Платежи' || name === 'Семьи' || name === 'Баланс') refreshBalanceFormulas_();
     // Auto-generate IDs when user starts filling key fields
     if (name === 'Семьи') maybeAutoIdRow_(sh, e.range.getRow(), 'family_id', 'F', 3, ['Ребёнок ФИО']);
     else if (name === 'Сборы') maybeAutoIdRow_(sh, e.range.getRow(), 'collection_id', 'C', 3, ['Название сбора']);
@@ -583,10 +583,17 @@ function setupBalanceExamples() {
   // B2: Название семьи по ID (автоспилл по A2:A)
   sh.getRange('B2').setFormula(`=ARRAYFORMULA(IF(LEN(A2:A)=0, "", IFERROR(VLOOKUP(A2:A, {Семьи!${idCol}2:${idCol}, Семьи!${nameCol}2:${nameCol}}, 2, FALSE), "")))`);
 
+  // Селектор фильтра начислений: OPEN | ALL (по умолчанию — ALL)
+  sh.getRange('H1').setValue('Фильтр начисления');
+  sh.getRange('I1').setValue('ALL');
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
+  sh.getRange('I1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('I1').setNote('Выберите OPEN (только открытые) или ALL (все сборы).');
+
   // Протянуть формулы по строкам для C:F на текущее число семей
   refreshBalanceFormulas_();
 
-  sh.getRange('H1').setValue('Примечание: даты платёжек используются только для справки (фильтры/отчёты). Расчёты мгновенные.');
+  sh.getRange('H3').setValue('Примечание: даты платёжек используются только для справки (фильтры/отчёты). Расчёты мгновенные.');
 }
 
 function refreshBalanceFormulas_() {
@@ -606,7 +613,8 @@ function refreshBalanceFormulas_() {
   for (let i = 0; i < rows; i++) {
     const r = 2 + i;
     // E: начислено/списано
-  formulasE.push([`=IFERROR(ACCRUED_FAMILY($A${r},"ALL"),0)`]);
+  // Use selector on Баланс!$I$1 with default fallback to "ALL"
+  formulasE.push([`=IFERROR(ACCRUED_FAMILY($A${r}, IF(LEN($I$1)=0, "ALL", $I$1)), 0)`]);
     // D: оплачено
     formulasD.push([`=IFERROR(PAYED_TOTAL_FAMILY($A${r}),0)`]);
     // C: текущая переплата
