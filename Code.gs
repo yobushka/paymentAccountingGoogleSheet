@@ -827,7 +827,7 @@ function refreshBalanceFormulas_() {
   shBal.getRange(2, 6, rows, 1).setFormulas(formulasF);
 }
 
-function setupSummarySheet_() {
+function setupDetailSheet_() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName('Детализация');
   if (!sh) return;
@@ -844,12 +844,11 @@ function setupSummarySheet_() {
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
   // Tick cell to force recalc on demand
   sh.getRange('J2').setValue('Tick');
-  sh.getRange('J3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
+  sh.getRange('K2').setValue(new Date().toISOString());
+  sh.getRange('J3').setValue('Детализация платежей и начислений. Автообновляется и может быть принудительно обновлена через Tick.');
   
   // Dynamic formulas starting from A2
   sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
-  
-  sh.getRange('J3').setValue('Автообновление при изменении данных. Строки генерируются динамически.');
 }
 
 function refreshDetailSheet_() {
@@ -878,12 +877,12 @@ function setupSummarySheet_() {
   sh.getRange('K1').setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
   sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
-  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
+  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы, сначала открытые, ниже — закрытые)');
   sh.getRange('J2').setValue('Tick');
   sh.getRange('K2').setValue(new Date().toISOString());
   // Array formula
   sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
-  sh.getRange('J3').setValue('Сводка по сборам. Значения обновляются автоматически.');
+  sh.getRange('J3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
 }
 
 function refreshSummarySheet_() {
