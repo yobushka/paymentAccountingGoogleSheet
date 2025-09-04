@@ -20,19 +20,32 @@
  */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Funds')
-    .addItem('Setup / Rebuild structure', 'init')
-    .addItem('Rebuild data validations', 'rebuildValidations')
-  .addItem('Recalculate (Balance & Detail)', 'recalculateAll')
-  .addItem('Cleanup visuals (trim sheets)', 'cleanupWorkbook_')
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('💰 Фонды')
+    .addItem('🔧 Настроить / Пересоздать структуру', 'init')
+    .addItem('🔄 Пересоздать валидации', 'rebuildValidations')
     .addSeparator()
-    .addItem('Generate IDs (all sheets)', 'generateAllIds')
-    .addItem('Close Collection (fix x & set Closed)', 'closeCollectionPrompt')
+    .addSubMenu(ui.createMenu('📊 Отчёты и действия')
+      .addItem('🔄 Пересчитать всё', 'recalculateAll')
+      .addItem('📈 Быстрая проверка баланса', 'showQuickBalanceCheck_')
+      .addItem('⚠️ Показать ошибки валидации', 'showValidationErrors_'))
+    .addSubMenu(ui.createMenu('🎨 Внешний вид и очистка')
+      .addItem('✨ Очистить лишнее (обрезать листы)', 'cleanupWorkbook_')
+      .addItem('🎯 Выделить ключевые данные', 'highlightKeyData_')
+      .addItem('📱 Мобильный вид', 'setupMobileView_'))
     .addSeparator()
-    .addItem('Load Sample Data (separate)', 'loadSampleDataPrompt')
+    .addSubMenu(ui.createMenu('⚙️ Управление данными')
+      .addItem('🆔 Сгенерировать ID (все листы)', 'generateAllIds')
+      .addItem('🔒 Закрыть сбор (зафиксировать x и пометить «Закрыт»)', 'closeCollectionPrompt')
+      .addItem('📋 Дублировать сбор', 'duplicateCollection_'))
+    .addSeparator()
+    .addItem('🎲 Загрузить пример данных', 'loadSampleDataPrompt')
+    .addItem('❓ Быстрая помощь', 'showQuickHelp_')
     .addToUi();
   // Ensure header notes are set on open as well
+  setupHeaderNotes_();
+  // Show welcome toast for first-time users
+  showWelcomeToast_();
   try { addHeaderNotes_(); } catch(e) {}
 }
 
@@ -179,39 +192,286 @@ function styleWorkbook_() {
   });
 }
 
+/** =========================
+ *  UX ENHANCEMENT FUNCTIONS
+ *  ========================= */
+
+function showWelcomeToast_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const instructionSheet = ss.getSheetByName('Инструкция');
+    if (instructionSheet && instructionSheet.getRange('A2').getValue() === '') {
+      // First time user - show welcome
+      ss.toast('Добро пожаловать! Начните с Funds → Setup, затем изучите лист "Инструкция".', '💰 Funds Tracker', 10);
+    }
+  } catch (e) {
+    Logger.log('Welcome toast error: ' + e.message);
+  }
+}
+
+function showQuickHelp_() {
+  const ui = SpreadsheetApp.getUi();
+  const help = `
+🏃‍♂️ БЫСТРЫЙ СТАРТ:
+1. Funds → Setup (если не сделали)
+2. Заполните "Семьи" (Активен=Да)
+3. Создайте "Сборы" (Статус=Открыт)
+4. Вносите "Платежи"
+5. Смотрите "Баланс" и "Сводка"
+
+🎯 ПОЛЕЗНЫЕ ЛИСТЫ:
+• "Инструкция" - подробное руководство
+• "Баланс" - кто сколько должен/переплатил
+• "Сводка" - статистика по сборам
+• "Детализация" - расшифровка по семьям
+
+⚡ БЫСТРЫЕ ДЕЙСТВИЯ:
+• Funds → Quick Balance Check
+• Funds → Recalculate All
+• Funds → Highlight Key Data
+
+❓ Проблемы? Проверьте лист "Инструкция" раздел "Советы".`;
+  
+  ui.alert('💰 Funds Tracker - Справка', help, ui.ButtonSet.OK);
+}
+
+function showQuickBalanceCheck_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const shBal = ss.getSheetByName('Баланс');
+    if (!shBal) {
+      SpreadsheetApp.getUi().alert('Ошибка', 'Лист "Баланс" не найден. Выполните Setup.', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+    
+    // Count families with debts and overpayments
+    const lastRow = shBal.getLastRow();
+    if (lastRow < 2) {
+      ss.toast('Нет данных для анализа.', 'Balance Check');
+      return;
+    }
+    
+    const data = shBal.getRange(2, 1, lastRow-1, 6).getValues();
+    let totalFamilies = 0, withDebts = 0, withOverpay = 0;
+    let totalDebt = 0, totalOverpay = 0;
+    
+    data.forEach(row => {
+      if (row[0]) { // has family_id
+        totalFamilies++;
+        const overpay = Number(row[2]) || 0;
+        const debt = Number(row[5]) || 0;
+        if (debt > 0) { withDebts++; totalDebt += debt; }
+        if (overpay > 0) { withOverpay++; totalOverpay += overpay; }
+      }
+    });
+    
+    const report = `
+📊 БЫСТРАЯ СВОДКА ПО БАЛАНСАМ:
+
+👥 Семьи: ${totalFamilies}
+💸 С задолженностью: ${withDebts} (общая сумма: ${totalDebt.toFixed(2)} ₽)
+💰 С переплатой: ${withOverpay} (общая сумма: ${totalOverpay.toFixed(2)} ₽)
+✅ Баланс "ноль": ${totalFamilies - withDebts - withOverpay}
+
+${withDebts > 0 ? '⚠️ Есть задолженности!' : '✅ Задолженностей нет'}
+${totalOverpay > totalDebt ? '💡 Переплат больше долгов - можно зачесть' : ''}`;
+    
+    SpreadsheetApp.getUi().alert('💰 Быстрая проверка балансов', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    toastErr_('Quick balance check failed: ' + e.message);
+  }
+}
+
+function showValidationErrors_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const issues = [];
+    
+    // Check for families without IDs
+    const shF = ss.getSheetByName('Семьи');
+    if (shF && shF.getLastRow() > 1) {
+      const mapF = getHeaderMap_(shF);
+      const ids = shF.getRange(2, mapF['family_id'], shF.getLastRow()-1, 1).getValues().flat();
+      const emptyIds = ids.filter((id, idx) => !id).length;
+      if (emptyIds > 0) issues.push(`• Семьи: ${emptyIds} строк без ID`);
+    }
+    
+    // Check for collections without IDs
+    const shC = ss.getSheetByName('Сборы');
+    if (shC && shC.getLastRow() > 1) {
+      const mapC = getHeaderMap_(shC);
+      const ids = shC.getRange(2, mapC['collection_id'], shC.getLastRow()-1, 1).getValues().flat();
+      const emptyIds = ids.filter(id => !id).length;
+      if (emptyIds > 0) issues.push(`• Сборы: ${emptyIds} строк без ID`);
+    }
+    
+    // Check payments
+    const shP = ss.getSheetByName('Платежи');
+    if (shP && shP.getLastRow() > 1) {
+      const mapP = getHeaderMap_(shP);
+      const amounts = shP.getRange(2, mapP['Сумма'], shP.getLastRow()-1, 1).getValues().flat();
+      const invalidAmounts = amounts.filter((amt, idx) => amt !== '' && (isNaN(amt) || Number(amt) <= 0)).length;
+      if (invalidAmounts > 0) issues.push(`• Платежи: ${invalidAmounts} некорректных сумм`);
+    }
+    
+    if (issues.length === 0) {
+      ss.toast('✅ Проблем не обнаружено!', 'Validation Check', 5);
+    } else {
+      const report = '⚠️ НАЙДЕННЫЕ ПРОБЛЕМЫ:\n\n' + issues.join('\n') + '\n\n💡 Используйте Funds → Generate IDs для исправления.';
+      SpreadsheetApp.getUi().alert('Проверка данных', report, SpreadsheetApp.getUi().ButtonSet.OK);
+    }
+  } catch (e) {
+    toastErr_('Validation check failed: ' + e.message);
+  }
+}
+
+function highlightKeyData_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    
+    // Highlight negative balances in red, positive in green
+    const shBal = ss.getSheetByName('Баланс');
+    if (shBal && shBal.getLastRow() > 1) {
+      const map = getHeaderMap_(shBal);
+      if (map['Задолженность']) {
+        const rng = shBal.getRange(2, map['Задолженность'], shBal.getLastRow()-1, 1);
+        rng.setBackground('#ffebee'); // Light red background
+        // Add bold formatting for values > 0
+        const values = rng.getValues();
+        for (let i = 0; i < values.length; i++) {
+          if (values[i][0] > 0) {
+            shBal.getRange(2+i, map['Задолженность']).setFontWeight('bold');
+          }
+        }
+      }
+    }
+    
+    ss.toast('✨ Ключевые данные выделены', 'Highlight Data', 3);
+  } catch (e) {
+    toastErr_('Highlight failed: ' + e.message);
+  }
+}
+
+function setupMobileView_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const sheets = ['Баланс', 'Сводка', 'Платежи'];
+    
+    sheets.forEach(sheetName => {
+      const sh = ss.getSheetByName(sheetName);
+      if (sh) {
+        // Set optimal column widths for mobile
+        sh.setColumnWidth(1, 100); // IDs shorter
+        if (sheetName === 'Баланс') {
+          sh.setColumnWidth(2, 180); // Names
+          sh.setColumnWidths(3, 4, 120); // Numbers
+        }
+        // Hide less important columns for mobile
+        if (sheetName === 'Платежи') {
+          const map = getHeaderMap_(sh);
+          if (map['Комментарий']) sh.hideColumns(map['Комментарий']);
+          if (map['payment_id']) sh.hideColumns(map['payment_id']);
+        }
+      }
+    });
+    
+    ss.toast('📱 Мобильный вид настроен', 'Mobile View', 3);
+  } catch (e) {
+    toastErr_('Mobile setup failed: ' + e.message);
+  }
+}
+
+function duplicateCollection_() {
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const shC = ss.getSheetByName('Сборы');
+    if (!shC) return;
+    
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.prompt('Дублировать сбор', 'Введите ID сбора для дублирования (например, C001):', ui.ButtonSet.OK_CANCEL);
+    
+    if (response.getSelectedButton() !== ui.Button.OK) return;
+    
+    const sourceId = response.getResponseText().trim();
+    if (!sourceId) return;
+    
+    // Find source collection
+    const map = getHeaderMap_(shC);
+    const data = shC.getRange(2, 1, shC.getLastRow()-1, shC.getLastColumn()).getValues();
+    const sourceRow = data.find(row => row[map['collection_id']-1] === sourceId);
+    
+    if (!sourceRow) {
+      ui.alert('Ошибка', `Сбор ${sourceId} не найден.`, ui.ButtonSet.OK);
+      return;
+    }
+    
+    // Create new row with new ID
+    const newId = generateNextId_(data.map(r => r[map['collection_id']-1]), 'C', 3);
+    const newRow = [...sourceRow];
+    newRow[map['collection_id']-1] = newId;
+    newRow[map['Название сбора']-1] = sourceRow[map['Название сбора']-1] + ' (копия)';
+    newRow[map['Статус']-1] = 'Открыт';
+    
+    // Add to sheet
+    shC.appendRow(newRow);
+    
+    ss.toast(`✅ Сбор дублирован как ${newId}`, 'Duplicate Collection', 5);
+    rebuildValidations(); // Refresh dropdowns
+  } catch (e) {
+    toastErr_('Duplicate collection failed: ' + e.message);
+  }
+}
+
 /** Adds helpful hover notes to header cells across main sheets */
 function addHeaderNotes_() {
   const ss = SpreadsheetApp.getActive();
+  // Enhanced notes with emojis and better explanations
+  
   // Семьи
   (function(){
     const sh = ss.getSheetByName('Семьи'); if (!sh) return;
     const notes = {
-      'Ребёнок ФИО': 'Фамилия Имя Отчество ребёнка. Одна строка = одна семья (один ребёнок).',
-  'День рождения': 'Дата рождения ребёнка (формат yyyy-mm-dd). Справочно.',
-  'Мама телеграм': 'Контакт мамы в Telegram (@username или ссылка).',
-  'Папа телеграм': 'Контакт папы в Telegram (@username или ссылка).',
-      'Мама ФИО': 'Контакты и реквизиты родителей используются справочно.',
-      'Активен': 'Да — семья участвует по умолчанию во всех открытых сборах, если не исключена в «Участие».',
-      'Комментарий': 'Любая заметка по семье.',
-      'family_id': 'Авто-ID семьи (генерируется при начале ввода). Не редактируйте.'
+      'Ребёнок ФИО': '👶 Фамилия Имя Отчество ребёнка.\nОдна строка = одна семья (один ребёнок).',
+      'День рождения': '🎂 Дата рождения ребёнка (формат yyyy-mm-dd).\nИспользуется справочно для возрастной аналитики.',
+      'Мама телеграм': '📱 Контакт мамы в Telegram (@username или ссылка)\nДля оперативной связи по платежам.',
+      'Папа телеграм': '📱 Контакт папы в Telegram (@username или ссылка)\nДля оперативной связи по платежам.',
+      'Мама ФИО': '👩 Контактная информация мамы.\nИспользуется справочно.',
+      'Активен': '✅ Да — семья участвует по умолчанию во всех открытых сборах\n❌ Нет — исключена из участия (если не указана в «Участие»)',
+      'Комментарий': '📝 Любая заметка по семье.\nНапример: льготы, особенности оплаты.',
+      'family_id': '🆔 Авто-ID семьи (F001, F002, ...).\n⚠️ Генерируется автоматически - не редактируйте!'
     };
     setHeaderNotes_(sh, notes);
   })();
 
-  // Сборы
+  // Сборы - enhanced notes
   (function(){
     const sh = ss.getSheetByName('Сборы'); if (!sh) return;
     const notes = {
-      'Название сбора': 'Короткое и понятное имя сбора. Будет показано в выпадающих списках.',
-      'Статус': 'Открыт — участвует в начислениях; Закрыт — не влияет (кроме оплаты/возвратов).',
-      'Дата начала': 'Справочно. На расчёты не влияет.',
-      'Дедлайн': 'Справочно. На расчёты не влияет.',
-  'Начисление': 'Режим: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers.',
-  'Параметр суммы': 'Для static_per_child — фикс на семью; для shared_total_all — общая сумма T; для shared_total_by_payers — общая сумма T (делится поровну между оплатившими); для dynamic_by_payers — цель T.',
-      'Фиксированный x': 'Для dynamic_by_payers — x после закрытия (Close Collection). До закрытия считается динамически.',
-      'Комментарий': 'Любая заметка по сбору.',
-  'collection_id': 'Авто-ID сбора (генерируется при начале ввода). Не редактируйте.',
-  'Ссылка на гуглдиск': 'Необязательная ссылка на папку/файл Google Drive, связанную со сбором.'
+      'Название сбора': '📋 Короткое и понятное имя сбора.\nПоказывается в выпадающих списках платежей.',
+      'Статус': '🔓 Открыт — участвует в начислениях\n🔒 Закрыт — не влияет (только оплаты/возвраты)',
+      'Дата начала': '📅 Справочно. На расчёты не влияет.\nПолезно для отчётности.',
+      'Дедлайн': '⏰ Справочно. На расчёты не влияет.\nДля контроля сроков сбора.',
+      'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание',
+      'Параметр суммы': '💰 Размер взноса или общая цель:\n• static_per_child: сумма с семьи\n• другие режимы: общая цель T',
+      'Фиксированный x': '🔒 Для dynamic_by_payers — cap после закрытия.\nДо закрытия рассчитывается автоматически.',
+      'Комментарий': '📝 Описание сбора, цели, особенности.\nВидно участникам.',
+      'collection_id': '🆔 Авто-ID сбора (C001, C002, ...).\n⚠️ Генерируется автоматически - не редактируйте!',
+      'Ссылка на гуглдиск': '☁️ Ссылка на папку/файл Google Drive.\nДля отчётов, документов по сбору.'
+    };
+    setHeaderNotes_(sh, notes);
+  })();
+
+  // Платежи - enhanced notes  
+  (function(){
+    const sh = ss.getSheetByName('Платежи'); if (!sh) return;
+    const notes = {
+      'Дата': '📅 Информационное поле.\nРасчёты мгновенные, дата на них не влияет.',
+      'family_id (label)': '👨‍👩‍👧‍👦 Выберите плательщика из списка.\nФормат: "Имя ребёнка (F001)"',
+      'collection_id (label)': '📋 Выберите сбор из списка.\nФормат: "Название сбора (C001)"',
+      'Сумма': '💰 Сумма платежа (должна быть > 0).\nВалидируется автоматически.',
+      'Способ': '💳 Способ оплаты:\nСБП, карта, наличные, др.',
+      'Комментарий': '📝 Дополнительная информация:\nназначение, особенности платежа.',
+      'payment_id': '🆔 Авто-ID платежа (PMT001, PMT002, ...).\n⚠️ Генерируется автоматически - не редактируйте!'
     };
     setHeaderNotes_(sh, notes);
   })();
@@ -287,8 +547,14 @@ function addHeaderNotes_() {
   'Ещё плательщиков до закрытия': 'Оценка по режиму:\n• static_per_child: ceil(Остаток/ставка)\n• shared_total_all: ceil(Остаток/(T/N))\n• shared_total_by_payers: ceil(Остаток/доля), доля≈T/K (или фиксированный x)\n• dynamic_by_payers: ceil(Остаток/x) при зафиксированном x; иначе пусто',
       'Остаток до цели': 'MAX(0, Сумма цели − Собрано).'
     };
-    setHeaderNotes_(sh, notes);
-  })();
+    function generateNextId_(existingIds, prefix, width) {
+  const nums = existingIds
+    .filter(id => id && String(id).startsWith(prefix))
+    .map(id => parseInt(String(id).substring(prefix.length)))
+    .filter(n => !isNaN(n));
+  const maxNum = nums.length ? Math.max(...nums) : 0;
+  const nextNum = maxNum + 1;
+  return prefix + String(nextNum).padStart(width, '0');
 }
 
 /** Assigns notes to headers by header text */
