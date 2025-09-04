@@ -1,0 +1,12 @@
+{
+  "name": "payment-accounting-google-sheet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --reporter=dot"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
