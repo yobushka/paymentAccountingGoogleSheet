@@ -44,19 +44,19 @@ function onEdit(e) {
     
     // Only refresh Balance for significant changes, not every edit
     if (name === 'Платежи') {
-      const col = e.range.getColumn();
-      const map = getHeaderMap_(sh);
-      // Only refresh if editing key columns: family, collection, amount
-      if (col === map['family_id (label)'] || col === map['collection_id (label)'] || col === map['Сумма']) {
-        refreshBalanceFormulas_();
-      }
+  const start = e.range.getColumn();
+  const end = start + e.range.getNumColumns() - 1;
+  const map = getHeaderMap_(sh);
+  const keys = [map['family_id (label)'], map['collection_id (label)'], map['Сумма']].filter(Boolean);
+  const overlaps = keys.some(c => c >= start && c <= end);
+  if (overlaps) refreshBalanceFormulas_();
     } else if (name === 'Семьи') {
-      const col = e.range.getColumn();
-      const map = getHeaderMap_(sh);
-      // Only refresh if editing family_id or Активен status
-      if (col === map['family_id'] || col === map['Активен']) {
-        refreshBalanceFormulas_();
-      }
+  const start = e.range.getColumn();
+  const end = start + e.range.getNumColumns() - 1;
+  const map = getHeaderMap_(sh);
+  const keys = [map['family_id'], map['Активен']].filter(Boolean);
+  const overlaps = keys.some(c => c >= start && c <= end);
+  if (overlaps) refreshBalanceFormulas_();
     } else if (name === 'Сборы') {
       // Mode/participants changes affect accruals; refresh Balance
       refreshBalanceFormulas_();
@@ -753,9 +753,12 @@ function setupDetailSheet_() {
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
   sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
+  // Tick cell to force recalc on demand
+  sh.getRange('J2').setValue('Tick');
+  sh.getRange('K2').setValue(new Date().toISOString());
   
   // Dynamic formulas starting from A2
-  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1))`);
+  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
   
   sh.getRange('J3').setValue('Автообновление при изменении данных. Строки генерируются динамически.');
 }
@@ -768,6 +771,8 @@ function refreshDetailSheet_() {
   // Trigger recalculation by touching the formula cell
   const current = sh.getRange('A2').getFormula();
   if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
+    // Update tick to force recalculation
+    sh.getRange('K2').setValue(new Date().toISOString());
     sh.getRange('A2').setFormula(current);
   }
 }
@@ -776,6 +781,9 @@ function refreshDetailSheet_() {
 function recalculateAll() {
   try {
     refreshBalanceFormulas_();
+  // bump detail tick to force recalculation
+  const sh = SpreadsheetApp.getActive().getSheetByName('Детализация');
+  if (sh) sh.getRange('K2').setValue(new Date().toISOString());
     refreshDetailSheet_();
   SpreadsheetApp.getActive().toast('Balance and Detail recalculated.', 'Funds');
   SpreadsheetApp.getUi().alert('Пересчёт завершён', 'Баланс и «Детализация» обновлены.', SpreadsheetApp.getUi().ButtonSet.OK);
@@ -1514,7 +1522,7 @@ function round2_(x){ return Math.round((x + Number.EPSILON) * 100) / 100; }
 function toastErr_(msg){ SpreadsheetApp.getActive().toast(msg, 'Funds (error)', 5); }
 
 /** Generate detailed payment/accrual breakdown for all families and collections (batched, optimized) */
-function GENERATE_DETAIL_BREAKDOWN(statusFilter) {
+function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
   const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
   const ss = SpreadsheetApp.getActive();
   const shF = ss.getSheetByName('Семьи');
