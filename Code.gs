@@ -1,5 +1,5 @@
 /** Funds tracker (1 family = 1 child) — production build
- * Modes: static_per_child (fixed per family), shared_total_all, shared_total_by_payers, dynamic_by_payers
+ * Modes: static_per_child (fixed per family), shared_total_all, shared_total_by_payers, dynamic_by_payers, proportional_by_payers, unit_price_by_payers
  * Sheets: Инструкция, Семьи, Сборы, Участие, Платежи, Баланс, Детализация, Сводка, Lists(hidden)
  * Dropdowns show "Название (ID)" everywhere; logic extracts IDs.
  * Dates matter only in Payments for reference; calculations are instant.
@@ -451,9 +451,11 @@ function addHeaderNotes_() {
       'Статус': '🔓 Открыт — участвует в начислениях\n🔒 Закрыт — не влияет (только оплаты/возвраты)',
       'Дата начала': '📅 Справочно. На расчёты не влияет.\nПолезно для отчётности.',
       'Дедлайн': '⏰ Справочно. На расчёты не влияет.\nДля контроля сроков сбора.',
-      'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание',
+  'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание (water-filling)\n• proportional_by_payers - пропорционально платежам (без долгов)\n• unit_price_by_payers - покупка поштучно: x=«Фиксированный x» (цена за единицу), списывается min(P_i, x) только у плативших',
       'Параметр суммы': '💰 Размер взноса или общая цель:\n• static_per_child: сумма с семьи\n• другие режимы: общая цель T',
-      'Фиксированный x': '🔒 Для dynamic_by_payers — cap после закрытия.\nДо закрытия рассчитывается автоматически.',
+  'Фиксированный x': '🔒 Для dynamic_by_payers — cap после закрытия (до закрытия рассчитывается автоматически).\nДля unit_price_by_payers — цена за одну единицу.',
+  'Закупка из средств': '🛒 Источник закупки: из каких денег была произведена закупка по этому сбору. Примеры: "Классный фонд", "Пожертвования", "Личные".',
+  'Возмещено': '♻️ Отмечайте "Да", если закупка уже возмещена из собранных средств; "Нет" — если возмещение ещё предстоит.',
       'Комментарий': '📝 Описание сбора, цели, особенности.\nВидно участникам.',
       'collection_id': '🆔 Авто-ID сбора (C001, C002, ...).\n⚠️ Генерируется автоматически - не редактируйте!',
       'Ссылка на гуглдиск': '☁️ Ссылка на папку/файл Google Drive.\nДля отчётов, документов по сбору.'
@@ -488,21 +490,6 @@ function addHeaderNotes_() {
     setHeaderNotes_(sh, notes);
   })();
 
-  // Платежи
-  (function(){
-    const sh = ss.getSheetByName('Платежи'); if (!sh) return;
-    const notes = {
-      'Дата': 'Справочно; не влияет на расчёты.',
-      'family_id (label)': 'Семья — из списка «Имя (ID)».',
-      'collection_id (label)': 'Сбор — из списка «Название (ID)». Разрешены закрытые сборы.',
-      'Сумма': 'Сумма платежа (> 0). Валидируется.',
-      'Способ': 'Например: СБП / карта / наличные.',
-      'Комментарий': 'Справочно.',
-      'payment_id': 'Авто-ID платежа (генерируется при начале ввода). Не редактируйте.'
-    };
-    setHeaderNotes_(sh, notes);
-  })();
-
   // Баланс
   (function(){
     const sh = ss.getSheetByName('Баланс'); if (!sh) return;
@@ -526,9 +513,9 @@ function addHeaderNotes_() {
       'collection_id': 'ID сбора. Только те, что попадают под фильтр (K1).',
       'Название сбора': 'Имя из листа «Сборы».',
       'Оплачено': 'Сумма платежей семьи в этот сбор.',
-  'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x).',
+  'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x), proportional — пропорционально платежам без долгов, unit_price_by_payers — min(P_i, x) для плативших (x=«Фиксированный x»).',
       'Разность (±)': 'Оплачено − Начислено. Положительное — переплата, отрицательное — недоплата.',
-  'Режим': 'Режим начисления: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers.'
+  'Режим': 'Режим начисления: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers | proportional_by_payers | unit_price_by_payers.'
     };
     setHeaderNotes_(sh, notes);
   })();
@@ -540,22 +527,30 @@ function addHeaderNotes_() {
       'collection_id': 'ID сбора.',
       'Название сбора': 'Имя из листа «Сборы».',
       'Режим': 'Режим начисления сбора.',
-      'Сумма цели': 'Для shared_total_all/shared_total_by_payers/dynamic_by_payers — заданная цель T. Для static_per_child — N(участников) × ставка.',
+  'Сумма цели': 'Для shared_total_all/shared_total_by_payers/dynamic_by_payers/proportional_by_payers/unit_price_by_payers — заданная цель T. Для static_per_child — N(участников) × ставка.',
       'Собрано': 'Сумма платежей по сбору от участников (Σ платежей).',
       'Участников': 'Число участников сбора (по правилам «Участие» и «Активен»).',
       'Плательщиков': 'Количество участников, у которых сумма платежей > 0 (K).',
-  'Ещё плательщиков до закрытия': 'Оценка по режиму:\n• static_per_child: ceil(Остаток/ставка)\n• shared_total_all: ceil(Остаток/(T/N))\n• shared_total_by_payers: ceil(Остаток/доля), доля≈T/K (или фиксированный x)\n• dynamic_by_payers: ceil(Остаток/x) при зафиксированном x; иначе пусто',
+  'Ещё плательщиков до закрытия': 'Оценка по режиму:\n• static_per_child: ceil(Остаток/ставка)\n• shared_total_all: ceil(Остаток/(T/N))\n• shared_total_by_payers: ceil(Остаток/доля), доля≈T/K (или фиксированный x)\n• dynamic_by_payers: ceil(Остаток/x) при зафиксированном x; иначе пусто\n• proportional_by_payers: — (не применяется)\n• unit_price_by_payers: ceil(Остаток/x), где x=«Фиксированный x»',
       'Остаток до цели': 'MAX(0, Сумма цели − Собрано).'
     };
-    function generateNextId_(existingIds, prefix, width) {
-  const nums = existingIds
-    .filter(id => id && String(id).startsWith(prefix))
-    .map(id => parseInt(String(id).substring(prefix.length)))
-    .filter(n => !isNaN(n));
-  const maxNum = nums.length ? Math.max(...nums) : 0;
-  const nextNum = maxNum + 1;
-  return prefix + String(nextNum).padStart(width, '0');
+    setHeaderNotes_(sh, notes);
+  })();
 }
+
+/**
+ * Ensures header notes are applied. Safe wrapper used on onOpen.
+ * If addHeaderNotes_ throws (e.g., missing sheets), we swallow the error.
+ */
+function setupHeaderNotes_() {
+  try {
+    addHeaderNotes_();
+  } catch (e) {
+    // no-op: notes are optional and shouldn't block UI
+  }
+}
+
+
 
 /** Assigns notes to headers by header text */
 function setHeaderNotes_(sh, byHeader) {
@@ -576,8 +571,10 @@ function styleSheetHeader_(sh) {
   // Banding for data rows (start from row 2 to keep header style)
   const lastRow = sh.getLastRow();
   if (lastRow >= 2) {
-    const dataRange = sh.getRange(2,1,lastRow-1,lastCol);
-    try { dataRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY).setHeaderRowColor(null); } catch(_) {}
+  const dataRange = sh.getRange(2,1,lastRow-1,lastCol);
+  // Remove existing bandings to avoid fragmentation and re-apply zebra
+  try { (sh.getBandings() || []).forEach(b => b.remove()); } catch(_) {}
+  try { dataRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY).setHeaderRowColor(null); } catch(_) {}
   }
   // Create filter on data range
   try { sh.getFilter() && sh.getFilter().remove(); } catch(_) {}
@@ -645,6 +642,9 @@ function styleCollectionsSheet_(sh) {
     rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Закрыт').setBackground('#eeeeee').setRanges([rng]).build());
     sh.setConditionalFormatRules(rules);
   }
+  // Align procurement fields
+  if (map['Возмещено']) sh.getRange(2, map['Возмещено'], lastRow-1, 1).setHorizontalAlignment('center');
+  if (map['Закупка из средств']) sh.getRange(2, map['Закупка из средств'], lastRow-1, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 }
 
 function styleFamiliesSheet_(sh) {
@@ -752,11 +752,13 @@ function getSheetsSpec() {
       headers: [
         'Название сбора','Статус',
         'Дата начала','Дедлайн',
-        'Начисление','Параметр суммы','Фиксированный x','Комментарий',
+        'Начисление','Параметр суммы','Фиксированный x',
+        'Закупка из средств','Возмещено',
+        'Комментарий',
         'collection_id','Ссылка на гуглдиск'
       ],
-      // Начисление: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers
-      colWidths: [260,120,110,110,220,150,140,260,120,300],
+  // Начисление: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers | proportional_by_payers | unit_price_by_payers
+      colWidths: [260,120,110,110,220,150,140,200,110,260,120,300],
       dateCols: [3,4]
     },
     {
@@ -826,7 +828,8 @@ function setupInstructionSheet() {
     ['▶ Дисклеймер', 'Инструмент на ранней стадии и используется для личных целей; welcome to contribute. Внимание к персональным данным: передача ПДн через границу может быть незаконной. Google — иностранная компания; соблюдайте применимое законодательство.'],
     ['▶ Быстрый старт', '1) Funds → Setup / Rebuild structure.\n2) Заполните «Семьи» (Активен=Да).\n3) Добавьте «Сборы» (Статус=Открыт).\n4) При необходимости настройте «Участие».\n5) Вносите «Платежи».\n6) Смотрите «Баланс» и «Детализация».\n7) «Сводка» — оперативные итоги по сборам.'],
   ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО, День рождения (yyyy-mm-dd), Телеграм мамы/папы и контакты родителей. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
-  ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). Можно указать «Ссылка на гуглдиск» (необязательно). Статус=Открыт — сбор учитывается в начислениях. Статус можно сменить на Закрыт после фиксации.'],
+  ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). «Фиксированный x»: для dynamic_by_payers — cap после закрытия, для unit_price_by_payers — цена за единицу. Можно указать «Ссылка на гуглдиск». Статус=Открыт — участвует в начислениях.'],
+  ['2.1', 'Закупка из средств / Возмещено: при необходимости фиксируйте закупку из собранных средств и отмечайте, возмещена ли сумма. Поля справочные.'],
     ['3', 'Участие (опционально): если есть хотя бы один «Участвует», участвуют только отмеченные семьи. «Не участвует» всегда исключает семью. Если явных «Участвует» нет — участвуют все активные семьи.'],
     ['4', 'Платежи: выберите семью и сбор из выпадающих списков «Название (ID)». Сумма платежа должна быть > 0 (валидируется). Дата — справочная и на расчёты не влияет.'],
   ['5', 'Баланс: отображает по каждой семье «Оплачено всего», «Начислено всего», «Переплата (текущая)», «Задолженность».'],
@@ -839,6 +842,8 @@ function setupInstructionSheet() {
     ['shared_total_all', 'T/N на всех участников.\n1 плательщик: всем участникам начислено T/N; у плательщика возможна временная переплата.\nНесколько плательщиков: у всех одинаковое начисление = T/N.'],
     ['shared_total_by_payers', 'T/K только для оплативших.\n1 плательщик: начисление = T (K=1); будет недоплата, если внесено < T.\nНесколько плательщиков: каждому платившему начислено T/K; не платившие = 0.'],
     ['dynamic_by_payers', 'Water‑filling: Σ min(P_i, x) = min(T, ΣP_i). Начислено семье i = min(P_i, x).\n1 плательщик: начисление = его платёж (до T), долг не растёт.\nНесколько плательщиков: x выравнивает ранние переплаты; после закрытия используется «Фиксированный x».'],
+  ['proportional_by_payers', 'Пропорционально платежам: начисление i = min(P_i, T) при Σ начислений = min(ΣP_i, T), распределение по долям P_i/ΣP. Пока не достигнута цель — списывается весь платёж. При превышении цели — суммы уменьшаются равнопропорционально. Долг не образуется.'],
+  ['unit_price_by_payers', 'Поштучная закупка: цена за единицу x берётся из «Фиксированный x». Начисление i = min(P_i, x) только тем, кто платил. Суммарная цель T — общая стоимость партии. Число участников (единиц) = ceil(T/x). Долг не образуется у тех, кто оплатил ≥ x.'],
 
     ['▶ Закрытие динамического сбора', 'Меню Funds → Close Collection. Введите collection_id (например, C003). Скрипт посчитает x (DYN_CAP) по фактическим платежам участников, запишет «Фиксированный x» и установит Статус=Закрыт. После закрытия используется зафиксированный x.'],
     ['DYN_CAP (формула)', 'DYN_CAP(T, payments_range) возвращает cap x по water-filling.\nПример: =DYN_CAP(6000, {2000,2000,700,700,700,700,700}) → 1250.'],
@@ -947,7 +952,7 @@ function rebuildValidations() {
   const lists = {
     statusOpenClosed: ['Открыт','Закрыт'],
     activeYesNo:      ['Да','Нет'],
-  accrualRules:     ['static_per_child','shared_total_all','shared_total_by_payers','dynamic_by_payers'],
+  accrualRules:     ['static_per_child','shared_total_all','shared_total_by_payers','dynamic_by_payers','proportional_by_payers','unit_price_by_payers'],
     payMethods:       ['СБП','карта','наличные'],
     partStatus:       ['Участвует','Не участвует']
   };
@@ -962,6 +967,8 @@ function rebuildValidations() {
   const mapC = getHeaderMap_(shC);
   if (mapC['Статус']) setValidationList(shC, 2, mapC['Статус'], lists.statusOpenClosed);
   if (mapC['Начисление']) setValidationList(shC, 2, mapC['Начисление'], lists.accrualRules);
+  // Сборы: Возмещено (Да/Нет)
+  if (mapC['Возмещено']) setValidationList(shC, 2, mapC['Возмещено'], lists.activeYesNo);
 
   // Участие: A=open collections labels, B=active families labels, C=Статус
   const shU = ss.getSheetByName('Участие');
@@ -1091,6 +1098,10 @@ function refreshBalanceFormulas_() {
   shBal.getRange(2, 4, rows, 1).setFormulas(formulasD);
   shBal.getRange(2, 5, rows, 1).setFormulas(formulasE);
   shBal.getRange(2, 6, rows, 1).setFormulas(formulasF);
+
+  // Ensure formulas materialize before styling, then re-apply zebra and column styles
+  SpreadsheetApp.flush();
+  try { styleSheetHeader_(shBal); styleBalanceSheet_(shBal); } catch(_) {}
 }
 
 function setupDetailSheet_() {
@@ -1127,7 +1138,9 @@ function refreshDetailSheet_() {
   if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
     // Update tick to force recalculation
     sh.getRange('K2').setValue(new Date().toISOString());
-    sh.getRange('A2').setFormula(current);
+  sh.getRange('A2').setFormula(current);
+  SpreadsheetApp.flush();
+  try { styleSheetHeader_(sh); styleDetailSheet_(sh); } catch(_) {}
   }
 }
 
@@ -1149,6 +1162,8 @@ function setupSummarySheet_() {
   // Array formula
   sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
   sh.getRange('J3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
+  SpreadsheetApp.flush();
+  try { styleSheetHeader_(sh); styleSummarySheet_(sh); } catch(_) {}
 }
 
 function refreshSummarySheet_() {
@@ -1159,6 +1174,12 @@ function refreshSummarySheet_() {
   if (current.includes('GENERATE_COLLECTION_SUMMARY')) {
     sh.getRange('K2').setValue(new Date().toISOString());
     sh.getRange('A2').setFormula(current);
+    // Re-apply styles to ensure alternating colors and header shading persist after rebuild
+    try {
+  SpreadsheetApp.flush();
+      styleSheetHeader_(sh);
+      styleSummarySheet_(sh);
+    } catch (e) {}
   }
 }
 
@@ -1374,14 +1395,17 @@ function loadSampleData_() {
   // Generate IDs for families
   if (mapF['family_id']) fillMissingIds_(ss, 'Семьи', mapF['family_id'], 'F', 3);
 
-  // Collections (3 demo)
+  // Collections (demo for all modes)
   const colStart = shC.getLastRow() + 1;
-  // Headers: ['Название сбора','Статус','Дата начала','Дедлайн','Начисление','Параметр суммы','Фиксированный x','Комментарий','collection_id','Ссылка на гуглдиск']
+  // Current headers:
+  // ['Название сбора','Статус','Дата начала','Дедлайн','Начисление','Параметр суммы','Фиксированный x','Закупка из средств','Возмещено','Комментарий','collection_id','Ссылка на гуглдиск']
   const colRows = [
-    ['Канцтовары сентябрь', 'Открыт', '', '', 'static_per_child', 500, '', 'Фикс 500₽ на семью', '', ''],
-    ['Новый год',           'Открыт', '', '', 'shared_total_all', 12000, '', 'Общая сумма делится на участников', '', ''],
-    ['Подарок учителю',     'Открыт', '', '', 'dynamic_by_payers', 9000, '', 'Динамический сбор по цели 9000₽', '', ''],
-    ['Фотосессия',          'Открыт', '', '', 'shared_total_by_payers', 10000, '', 'Сумма делится поровну между оплатившими', '', '']
+    ['Канцтовары сентябрь', 'Открыт', '', '', 'static_per_child', 500,   '',         '',      '', 'Фикс 500₽ на семью',           '', ''],
+    ['Новый год',           'Открыт', '', '', 'shared_total_all', 12000, '',         '',      '', 'Общая сумма делится на участников', '', ''],
+    ['Подарок учителю',     'Открыт', '', '', 'dynamic_by_payers', 9000, '',         '',      '', 'Динамический сбор по цели 9000₽',   '', ''],
+    ['Фотосессия',          'Открыт', '', '', 'shared_total_by_payers', 10000, '',   '',      '', 'Делим сумму между оплатившими',     '', ''],
+    ['Помощь классу',       'Открыт', '', '', 'proportional_by_payers', 8000, '',    '',      '', 'Пропорционально платежам',         '', ''],
+    ['Спортивная форма',    'Открыт', '', '', 'unit_price_by_payers', 15000, 1500,   '',      'Нет', 'Поштучная закупка: x=1500₽',      '', '']
   ];
   shC.getRange(colStart, 1, colRows.length, shC.getLastColumn()).setValues(colRows);
 
@@ -1391,15 +1415,26 @@ function loadSampleData_() {
   // Refresh Lists (labels)
   setupListsSheet();
 
-  // Participation (leave empty for C001, i.e., all active; restrict New Year C002 to 8 families; exclude 2 from dynamic C003)
-  const allFam = getLabelColumn_('Lists', 'D', 2); // all families labels
-  const openCols = getLabelColumn_('Lists', 'A', 2); // open collections labels
-  // Find labels for the three collections we just created:
-  const cLabels = getLabelColumn_('Lists', 'B', 2); // all collections labels
-  const c1Label = cLabels.find(s => /\(C001\)$/.test(s)) || '';
-  const c2Label = cLabels.find(s => /\(C002\)$/.test(s)) || '';
-  const c3Label = cLabels.find(s => /\(C003\)$/.test(s)) || '';
-  const c4Label = cLabels.find(s => /\(C004\)$/.test(s)) || '';
+  // Build labels for newly added collections based on their actual IDs
+  const newCount = colRows.length;
+  const cVals = shC.getRange(colStart, 1, newCount, shC.getLastColumn()).getValues();
+  const cHdr = shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0];
+  const ci = {}; cHdr.forEach((h,idx)=>ci[h]=idx);
+  const labelByName = new Map();
+  cVals.forEach(r => {
+    const nm = String(r[ci['Название сбора']]||'').trim();
+    const id = String(r[ci['collection_id']]||'').trim();
+    if (nm && id) labelByName.set(nm, `${nm} (${id})`);
+  });
+  const c1Label = labelByName.get('Канцтовары сентябрь') || '';
+  const c2Label = labelByName.get('Новый год') || '';
+  const c3Label = labelByName.get('Подарок учителю') || '';
+  const c4Label = labelByName.get('Фотосессия') || '';
+  const c5Label = labelByName.get('Помощь классу') || '';
+  const c6Label = labelByName.get('Спортивная форма') || '';
+
+  // Families labels (all families)
+  const allFam = getLabelColumn_('Lists', 'D', 2);
 
   const partStart = shU.getLastRow() + 1;
   const partRows = [];
@@ -1411,7 +1446,7 @@ function loadSampleData_() {
     shU.getRange(partStart, 1, partRows.length, 4).setValues(partRows);
   }
 
-  // Payments: mix of three collections
+  // Payments: mix across all collections
   const payStart = shP.getLastRow() + 1;
   const today = new Date();
   const addDays = (d) => new Date(today.getTime() + d*24*3600*1000);
@@ -1435,6 +1470,20 @@ function loadSampleData_() {
   // For C004 (shared_total_by_payers 10000): 4 families pay; начисление будет T/K=2500 только им
   if (c4Label) {
     allFam.slice(0,4).forEach((lbl,i) => payRows.push([toISO_(addDays(-4+i)), lbl, c4Label, 2500, i%2? 'карта':'СБП', 'Оплата доли', '']));
+  }
+
+  // For C005 (proportional_by_payers 8000): 5 семей платят разными суммами (будет пропорциональное списание)
+  if (c5Label) {
+    const fams = allFam.slice(2,7);
+    const amounts = [3000, 2000, 1500, 800, 500]; // суммарно 7800 < T
+    fams.forEach((lbl, i) => payRows.push([toISO_(addDays(-2+i)), lbl, c5Label, amounts[i], i%2 ? 'карта' : 'СБП', 'Разные суммы', '']));
+  }
+
+  // For C006 (unit_price_by_payers T=15000, x=1500):
+  // 6 семей платят ≥ x (полная единица), 2 — частично (< x), 2 — не платят
+  if (c6Label) {
+    allFam.slice(0,6).forEach((lbl,i) => payRows.push([toISO_(addDays(-7+i)), lbl, c6Label, 1500, 'СБП', 'Одна единица', '']));
+    allFam.slice(6,8).forEach((lbl,i) => payRows.push([toISO_(addDays(-6-i)), lbl, c6Label, 700,  'наличные', 'Частичная оплата', '']));
   }
 
   if (payRows.length) {
@@ -1687,6 +1736,28 @@ function ACCRUED_FAMILY(familyLabelOrId, statusFilter) {
           famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) payments.push(sum); });
           const x = fixedX > 0 ? fixedX : DYN_CAP_(paramT, payments);
           accrued = Math.min(Pi, x);
+        }
+      } else if (accrual === 'proportional_by_payers') {
+        // Accrue proportionally to payments among participants, capping total at T.
+        if (participants.has(famId)) {
+          // Sum of payments among participants
+          let sumP = 0;
+          famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) sumP += sum; });
+          if (sumP <= 0) {
+            accrued = 0;
+          } else {
+            const target = Math.min(paramT, sumP);
+            const ratio = target / sumP; // <= 1
+            accrued = Pi > 0 ? (Pi * ratio) : 0;
+          }
+        }
+      } else if (accrual === 'unit_price_by_payers') {
+        // Per payer up to one unit priced at fixedX; only those who paid get accrual; no debt if Pi >= x
+        const x = fixedX > 0 ? fixedX : 0;
+        if (participants.has(famId) && x > 0) {
+          accrued = Math.min(Pi, x);
+        } else {
+          accrued = 0;
         }
       }
       total += accrued;
@@ -2033,7 +2104,7 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
       }
     }
 
-    // Pre-compute K for shared_total_by_payers
+  // Pre-compute K for shared_total_by_payers
     let kPayers = 0;
     if (accrual === 'shared_total_by_payers') {
       famPays.forEach((sum, fid) => { if (participants.has(fid) && sum > 0) kPayers++; });
@@ -2062,6 +2133,21 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
         } else {
           accrued = 0;
         }
+      } else if (accrual === 'proportional_by_payers') {
+        if (participants.has(fid)) {
+          let sumP = 0;
+          famPays.forEach((sum, f2) => { if (participants.has(f2) && sum > 0) sumP += sum; });
+          if (sumP > 0) {
+            const target = Math.min(T, sumP);
+            const ratio = target / sumP;
+            accrued = paid > 0 ? (paid * ratio) : 0;
+          } else {
+            accrued = 0;
+          }
+        }
+      } else if (accrual === 'unit_price_by_payers') {
+        const x = fixedX > 0 ? fixedX : 0;
+        accrued = (participants.has(fid) && x > 0) ? Math.min(paid, x) : 0;
       }
       if (paid > 0 || accrued > 0) {
         out.push([
@@ -2175,7 +2261,7 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     if (participants.size === 0 && payByCol.has(id)) payByCol.get(id).forEach((_,fid)=>participants.add(fid));
 
     const famPays = payByCol.get(id) || new Map();
-    // Collected from participants only
+  // Collected from participants only
     let collected = 0; let K = 0;
     famPays.forEach((sum, fid)=>{ if (participants.has(fid)) { collected += sum; if (sum>0) K++; } });
 
@@ -2206,6 +2292,12 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     } else if (mode === 'dynamic_by_payers') {
       // if x fixed (closed), estimate by x; else leave blank
       needMore = fixedX > 0 ? Math.ceil(remaining / fixedX) : '';
+    } else if (mode === 'proportional_by_payers') {
+      // Not applicable: proportional redistribution among payers; no discrete payers needed metric
+      needMore = '';
+    } else if (mode === 'unit_price_by_payers') {
+      const x = fixedX > 0 ? fixedX : 0;
+      needMore = x > 0 ? Math.ceil(remaining / x) : '';
     } else {
       needMore = '';
     }
@@ -2216,7 +2308,8 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
       mode,
       round2_(Ttotal),
       round2_(collected),
-      participants.size,
+  // For unit_price_by_payers, show required units count based on T and x
+  (mode === 'unit_price_by_payers' ? (fixedX>0 ? Math.ceil((T||0)/fixedX) : participants.size) : participants.size),
       K,
       needMore,
       round2_(remaining)
@@ -2231,7 +2324,9 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     // Insert section headers as single labeled rows for clarity
     if (openRows.length) out.push(['','ОТКРЫТЫЕ СБОРЫ','','','','','','','']);
     Array.prototype.push.apply(out, openRows);
-    if (closedRows.length) out.push(['','ЗАКРЫТЫЕ СБОРЫ','','','','','','','']);
+  // Add visual separation: 5 empty rows between open and closed sections
+  for (let i = 0; i < 5; i++) out.push(['','','','','','','','','']);
+  if (closedRows.length) out.push(['','ЗАКРЫТЫЕ СБОРЫ','','','','','','','']);
     Array.prototype.push.apply(out, closedRows);
   } else {
     Array.prototype.push.apply(out, collectionsToProcess.map(buildRow));
@@ -2356,7 +2451,23 @@ function getSingleAccrual_(familyId, collectionId, statusFilter) {
       const x = collectionData.fixedX > 0 ? collectionData.fixedX : DYN_CAP_(collectionData.paramT, payments);
       accrued = Math.min(Pi, x);
     }
+  } else if (collectionData.accrual === 'proportional_by_payers') {
+    if (participants.has(familyId)) {
+      let sumP = 0;
+      famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) sumP += sum; });
+      if (sumP > 0) {
+        const target = Math.min(collectionData.paramT, sumP);
+        const ratio = target / sumP;
+        accrued = Pi > 0 ? (Pi * ratio) : 0;
+      } else {
+        accrued = 0;
+      }
+    }
+  } else if (collectionData.accrual === 'unit_price_by_payers') {
+    const x = collectionData.fixedX > 0 ? collectionData.fixedX : 0;
+    if (participants.has(familyId) && x > 0) accrued = Math.min(Pi, x); else accrued = 0;
   }
   
   return round2_(accrued);
 }
+
