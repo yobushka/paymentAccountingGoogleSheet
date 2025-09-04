@@ -451,7 +451,7 @@ function addHeaderNotes_() {
       'Статус': '🔓 Открыт — участвует в начислениях\n🔒 Закрыт — не влияет (только оплаты/возвраты)',
       'Дата начала': '📅 Справочно. На расчёты не влияет.\nПолезно для отчётности.',
       'Дедлайн': '⏰ Справочно. На расчёты не влияет.\nДля контроля сроков сбора.',
-  'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание (water-filling)\n• proportional_by_payers - пропорционально платежам (без долгов)\n• unit_price_by_payers - покупка поштучно: x=«Фиксированный x» (цена за единицу), списывается min(P_i, x) только у плативших',
+  'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание (water-filling)\n• proportional_by_payers - пропорционально платежам (без долгов)\n• unit_price_by_payers - поштучно: x=«Фиксированный x» (цена за единицу), списывается floor(P_i/x)*x (полными единицами) только у плативших',
       'Параметр суммы': '💰 Размер взноса или общая цель:\n• static_per_child: сумма с семьи\n• другие режимы: общая цель T',
   'Фиксированный x': '🔒 Для dynamic_by_payers — cap после закрытия (до закрытия рассчитывается автоматически).\nДля unit_price_by_payers — цена за одну единицу.',
   'Закупка из средств': '🛒 Источник закупки: из каких денег была произведена закупка по этому сбору. Примеры: "Классный фонд", "Пожертвования", "Личные".',
@@ -513,7 +513,7 @@ function addHeaderNotes_() {
       'collection_id': 'ID сбора. Только те, что попадают под фильтр (K1).',
       'Название сбора': 'Имя из листа «Сборы».',
       'Оплачено': 'Сумма платежей семьи в этот сбор.',
-  'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x), proportional — пропорционально платежам без долгов, unit_price_by_payers — min(P_i, x) для плативших (x=«Фиксированный x»).',
+  'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x), proportional — пропорционально платежам без долгов, unit_price_by_payers — floor(P_i/x)*x (полные единицы; x=«Фиксированный x»).',
       'Разность (±)': 'Оплачено − Начислено. Положительное — переплата, отрицательное — недоплата.',
   'Режим': 'Режим начисления: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers | proportional_by_payers | unit_price_by_payers.'
     };
@@ -530,7 +530,8 @@ function addHeaderNotes_() {
   'Сумма цели': 'Для shared_total_all/shared_total_by_payers/dynamic_by_payers/proportional_by_payers/unit_price_by_payers — заданная цель T. Для static_per_child — N(участников) × ставка.',
       'Собрано': 'Сумма платежей по сбору от участников (Σ платежей).',
       'Участников': 'Число участников сбора (по правилам «Участие» и «Активен»).',
-      'Плательщиков': 'Количество участников, у которых сумма платежей > 0 (K).',
+  'Плательщиков': 'Число уникальных плательщиков (K). Для unit_price_by_payers число единиц смотрите в «Единиц оплачено».',
+  'Единиц оплачено': 'Только для unit_price_by_payers: ⌊Собрано/x⌋ (x = «Фиксированный x»). Показывает, сколько штук уже профинансировано.',
   'Ещё плательщиков до закрытия': 'Оценка по режиму:\n• static_per_child: ceil(Остаток/ставка)\n• shared_total_all: ceil(Остаток/(T/N))\n• shared_total_by_payers: ceil(Остаток/доля), доля≈T/K (или фиксированный x)\n• dynamic_by_payers: ceil(Остаток/x) при зафиксированном x; иначе пусто\n• proportional_by_payers: — (не применяется)\n• unit_price_by_payers: ceil(Остаток/x), где x=«Фиксированный x»',
       'Остаток до цели': 'MAX(0, Сумма цели − Собрано).'
     };
@@ -705,7 +706,7 @@ function styleSummarySheet_(sh) {
   const lastRow = Math.max(sh.getLastRow(), 2);
   // Number formats
   ['Сумма цели','Собрано','Остаток до цели'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right'); });
-  ['Участников','Плательщиков','Ещё плательщиков до закрытия'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('0').setHorizontalAlignment('center'); });
+  ['Участников','Плательщиков','Единиц оплачено','Ещё плательщиков до закрытия'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('0').setHorizontalAlignment('center'); });
   if (map['collection_id']) sh.getRange(2, map['collection_id'], lastRow-1, 1).setHorizontalAlignment('center');
   // Conditional formatting for Остаток > 0
   if (map['Остаток до цели'] && lastRow > 1) {
@@ -794,9 +795,9 @@ function getSheetsSpec() {
     {
       name: 'Сводка',
       headers: [
-        'collection_id','Название сбора','Режим','Сумма цели','Собрано','Участников','Плательщиков','Ещё плательщиков до закрытия','Остаток до цели'
+        'collection_id','Название сбора','Режим','Сумма цели','Собрано','Участников','Плательщиков','Единиц оплачено','Ещё плательщиков до закрытия','Остаток до цели'
       ],
-      colWidths: [120,260,180,140,140,120,150,220,150]
+      colWidths: [120,260,180,140,140,120,150,150,220,150]
     },
     {
       name: 'Lists', // hidden
@@ -843,7 +844,7 @@ function setupInstructionSheet() {
     ['shared_total_by_payers', 'T/K только для оплативших.\n1 плательщик: начисление = T (K=1); будет недоплата, если внесено < T.\nНесколько плательщиков: каждому платившему начислено T/K; не платившие = 0.'],
     ['dynamic_by_payers', 'Water‑filling: Σ min(P_i, x) = min(T, ΣP_i). Начислено семье i = min(P_i, x).\n1 плательщик: начисление = его платёж (до T), долг не растёт.\nНесколько плательщиков: x выравнивает ранние переплаты; после закрытия используется «Фиксированный x».'],
   ['proportional_by_payers', 'Пропорционально платежам: начисление i = min(P_i, T) при Σ начислений = min(ΣP_i, T), распределение по долям P_i/ΣP. Пока не достигнута цель — списывается весь платёж. При превышении цели — суммы уменьшаются равнопропорционально. Долг не образуется.'],
-  ['unit_price_by_payers', 'Поштучная закупка: цена за единицу x берётся из «Фиксированный x». Начисление i = min(P_i, x) только тем, кто платил. Суммарная цель T — общая стоимость партии. Число участников (единиц) = ceil(T/x). Долг не образуется у тех, кто оплатил ≥ x.'],
+  ['unit_price_by_payers', 'Поштучная закупка: цена за единицу x берётся из «Фиксированный x». Начисление i = floor(P_i/x)*x (только полные единицы) только тем, кто платил. Частичный остаток < x остаётся как переплата без долга. Суммарная цель T — общая стоимость партии. Число единиц = ceil(T/x).'],
 
     ['▶ Закрытие динамического сбора', 'Меню Funds → Close Collection. Введите collection_id (например, C003). Скрипт посчитает x (DYN_CAP) по фактическим платежам участников, запишет «Фиксированный x» и установит Статус=Закрыт. После закрытия используется зафиксированный x.'],
     ['DYN_CAP (формула)', 'DYN_CAP(T, payments_range) возвращает cap x по water-filling.\nПример: =DYN_CAP(6000, {2000,2000,700,700,700,700,700}) → 1250.'],
@@ -1341,12 +1342,17 @@ function closeCollection_(collectionId) {
     });
   }
   const payments = Array.from(paymentsByFam.values());
-  const x = (accrual === 'dynamic_by_payers') ? DYN_CAP_(paramT, payments) : paramT;
-
-  // Write back
-  if (mapC['Фиксированный x']) shC.getRange(rowNum, mapC['Фиксированный x']).setValue(x);
-  if (mapC['Статус'])           shC.getRange(rowNum, mapC['Статус']).setValue('Закрыт');
-  SpreadsheetApp.getActive().toast(`Сбор ${collectionId} закрыт. x=${x}`, 'Funds');
+  // Compute and write back only for dynamic_by_payers; for других режимов не трогаем «Фиксированный x»
+  if (accrual === 'dynamic_by_payers') {
+    const x = DYN_CAP_(paramT, payments);
+    if (mapC['Фиксированный x']) shC.getRange(rowNum, mapC['Фиксированный x']).setValue(x);
+    if (mapC['Статус'])           shC.getRange(rowNum, mapC['Статус']).setValue('Закрыт');
+    SpreadsheetApp.getActive().toast(`Сбор ${collectionId} закрыт. x=${x}`, 'Funds');
+  } else {
+    // For unit_price_by_payers and others: do not overwrite Fixed X; just close
+    if (mapC['Статус'])           shC.getRange(rowNum, mapC['Статус']).setValue('Закрыт');
+    SpreadsheetApp.getActive().toast(`Сбор ${collectionId} закрыт.`, 'Funds');
+  }
 }
 
 /** =========================
@@ -1462,10 +1468,10 @@ function loadSampleData_() {
   shareFamilies.slice(0,5).forEach((lbl,i) => payRows.push([toISO_(addDays(-3+i)), lbl, c2Label, 1500, 'СБП', 'Частично/полностью', '']));
   shareFamilies.slice(5,8).forEach((lbl,i) => payRows.push([toISO_(addDays(-2-i)), lbl, c2Label, 800,  'наличные', 'Частично', '']));
 
-  // For C003 (dynamic 9000, excluding 2 families): early big payers, later small
+  // For C003 (dynamic 9000, excluding 2 families): пример из README — платежи [2000,2000,700,700,700,700,700]
   const dynFamilies = allFam.slice(2); // первые двое исключены
-  dynFamilies.slice(0,3).forEach((lbl,i) => payRows.push([toISO_(addDays(-6+i)), lbl, c3Label, 2000, 'СБП', 'Ранний платёж', '']));
-  dynFamilies.slice(3,8).forEach((lbl,i) => payRows.push([toISO_(addDays(-1-i)), lbl, c3Label, 700,  'карта', 'Позже', '']));
+  dynFamilies.slice(0,2).forEach((lbl,i) => payRows.push([toISO_(addDays(-6+i)), lbl, c3Label, 2000, 'СБП', 'Ранний платёж', '']));
+  dynFamilies.slice(2,7).forEach((lbl,i) => payRows.push([toISO_(addDays(-1-i)), lbl, c3Label, 700,  'карта', 'Позже', '']));
 
   // For C004 (shared_total_by_payers 10000): 4 families pay; начисление будет T/K=2500 только им
   if (c4Label) {
@@ -1479,11 +1485,20 @@ function loadSampleData_() {
     fams.forEach((lbl, i) => payRows.push([toISO_(addDays(-2+i)), lbl, c5Label, amounts[i], i%2 ? 'карта' : 'СБП', 'Разные суммы', '']));
   }
 
-  // For C006 (unit_price_by_payers T=15000, x=1500):
-  // 6 семей платят ≥ x (полная единица), 2 — частично (< x), 2 — не платят
+  // For C006 (unit_price_by_payers T=15000, x=1500): демонстрация мульти-единиц у одного плательщика
+  // Платежи: [1500,1500,1500,3000,4500,1500,700,700] → единиц оплачено = 9, частичные не формируют начисление
   if (c6Label) {
-    allFam.slice(0,6).forEach((lbl,i) => payRows.push([toISO_(addDays(-7+i)), lbl, c6Label, 1500, 'СБП', 'Одна единица', '']));
-    allFam.slice(6,8).forEach((lbl,i) => payRows.push([toISO_(addDays(-6-i)), lbl, c6Label, 700,  'наличные', 'Частичная оплата', '']));
+    const fams = allFam.slice(0,8);
+    const amounts = [1500,1500,1500,3000,4500,1500,700,700];
+    fams.forEach((lbl,i) => payRows.push([
+      toISO_(addDays(-7+i)),
+      lbl,
+      c6Label,
+      amounts[i],
+      (i%2 ? 'карта' : 'СБП'),
+      amounts[i] >= 1500 ? (amounts[i] % 1500 === 0 ? `${amounts[i]/1500} ед.` : 'Частично') : 'Частично',
+      ''
+    ]));
   }
 
   if (payRows.length) {
@@ -1752,13 +1767,13 @@ function ACCRUED_FAMILY(familyLabelOrId, statusFilter) {
           }
         }
       } else if (accrual === 'unit_price_by_payers') {
-        // Per payer up to one unit priced at fixedX; only those who paid get accrual; no debt if Pi >= x
-        const x = fixedX > 0 ? fixedX : 0;
-        if (participants.has(famId) && x > 0) {
-          accrued = Math.min(Pi, x);
-        } else {
-          accrued = 0;
-        }
+            // Per payer multiple units allowed: accrue full units only, floor(Pi/x)*x; partial < x remains как переплата без долга
+            const x = fixedX > 0 ? fixedX : 0;
+            if (participants.has(famId) && x > 0) {
+              accrued = Math.floor(Pi / x) * x;
+            } else {
+              accrued = 0;
+            }
       }
       total += accrued;
     });
@@ -2030,7 +2045,7 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
     });
   }
 
-  if (collections.size === 0 || families.size === 0) return [['','','','','','','','']];
+  if (collections.size === 0 || families.size === 0) return [['','','','','','','','','','']];
 
   // Participation: per collection
   const partByCol = new Map(); // colId -> {hasInclude, include:Set, exclude:Set}
@@ -2146,8 +2161,8 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
           }
         }
       } else if (accrual === 'unit_price_by_payers') {
-        const x = fixedX > 0 ? fixedX : 0;
-        accrued = (participants.has(fid) && x > 0) ? Math.min(paid, x) : 0;
+      const x = fixedX > 0 ? fixedX : 0;
+      accrued = (participants.has(fid) && x > 0) ? (Math.floor(paid / x) * x) : 0;
       }
       if (paid > 0 || accrued > 0) {
         out.push([
@@ -2214,7 +2229,7 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
   // Filter by status for OPEN mode
   let collectionsToProcess = collections;
   if (onlyOpen) collectionsToProcess = collections.filter(c => c.status === 'Открыт');
-  if (!collectionsToProcess.length) return [['','','','','','','','']];
+  if (!collectionsToProcess.length) return [['','','','','','','','','','']];
 
   // Participation
   const partByCol = new Map();
@@ -2264,6 +2279,12 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
   // Collected from participants only
     let collected = 0; let K = 0;
     famPays.forEach((sum, fid)=>{ if (participants.has(fid)) { collected += sum; if (sum>0) K++; } });
+    // Units paid for unit_price_by_payers
+    let unitsPaid = '';
+    if (mode === 'unit_price_by_payers') {
+      const x = (fixedX > 0) ? fixedX : 0;
+      if (x > 0) unitsPaid = Math.floor(collected / x);
+    }
 
     // Target total
     let Ttotal = 0;
@@ -2302,17 +2323,22 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
       needMore = '';
     }
 
+  // For unit_price_by_payers we output both K (unique payers) and UnitsPaid separately
+
     return [
       id,
       name,
       mode,
-      round2_(Ttotal),
-      round2_(collected),
-  // For unit_price_by_payers, show required units count based on T and x
+  round2_(Ttotal),
+  round2_(collected),
+  // Participants:
   (mode === 'unit_price_by_payers' ? (fixedX>0 ? Math.ceil((T||0)/fixedX) : participants.size) : participants.size),
-      K,
-      needMore,
-      round2_(remaining)
+  // Unique payers (K)
+  K,
+  // Units paid (for unit_price_by_payers) or blank otherwise
+  (mode === 'unit_price_by_payers' ? (unitsPaid === '' ? '' : unitsPaid) : ''),
+  needMore,
+  round2_(remaining)
     ];
   };
 
@@ -2322,17 +2348,17 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     const openRows = collections.filter(c => c.status === 'Открыт').map(buildRow);
     const closedRows = collections.filter(c => c.status !== 'Открыт').map(buildRow);
     // Insert section headers as single labeled rows for clarity
-    if (openRows.length) out.push(['','ОТКРЫТЫЕ СБОРЫ','','','','','','','']);
+  if (openRows.length) out.push(['','ОТКРЫТЫЕ СБОРЫ','','','','','','','','']);
     Array.prototype.push.apply(out, openRows);
   // Add visual separation: 5 empty rows between open and closed sections
-  for (let i = 0; i < 5; i++) out.push(['','','','','','','','','']);
-  if (closedRows.length) out.push(['','ЗАКРЫТЫЕ СБОРЫ','','','','','','','']);
+  for (let i = 0; i < 5; i++) out.push(['','','','','','','','','','']);
+  if (closedRows.length) out.push(['','ЗАКРЫТЫЕ СБОРЫ','','','','','','','','']);
     Array.prototype.push.apply(out, closedRows);
   } else {
     Array.prototype.push.apply(out, collectionsToProcess.map(buildRow));
   }
 
-  return out.length ? out : [['','','','','','','','']];
+  return out.length ? out : [['','','','','','','','','','']];
 }
 
 /** Calculate accrual for a specific family/collection pair */
@@ -2464,8 +2490,8 @@ function getSingleAccrual_(familyId, collectionId, statusFilter) {
       }
     }
   } else if (collectionData.accrual === 'unit_price_by_payers') {
-    const x = collectionData.fixedX > 0 ? collectionData.fixedX : 0;
-    if (participants.has(familyId) && x > 0) accrued = Math.min(Pi, x); else accrued = 0;
+  const x = collectionData.fixedX > 0 ? collectionData.fixedX : 0;
+  if (participants.has(familyId) && x > 0) accrued = Math.floor(Pi / x) * x; else accrued = 0;
   }
   
   return round2_(accrued);
