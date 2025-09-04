@@ -25,6 +25,7 @@ function onOpen() {
     .addItem('Setup / Rebuild structure', 'init')
     .addItem('Rebuild data validations', 'rebuildValidations')
   .addItem('Recalculate (Balance & Detail)', 'recalculateAll')
+  .addItem('Cleanup visuals (trim sheets)', 'cleanupWorkbook_')
     .addSeparator()
     .addItem('Generate IDs (all sheets)', 'generateAllIds')
     .addItem('Close Collection (fix x & set Closed)', 'closeCollectionPrompt')
@@ -129,6 +130,30 @@ function init() {
   SpreadsheetApp.getActive().toast('Structure created/updated.', 'Funds');
 }
 
+/** Cleanup visuals: trim extra rows/columns to used area and re-apply styles */
+function cleanupWorkbook_() {
+  const ss = SpreadsheetApp.getActive();
+  const sheets = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация','Сводка'];
+  sheets.forEach(name => {
+    const sh = ss.getSheetByName(name); if (!sh) return;
+    const lastRow = Math.max(1, sh.getLastRow());
+    const lastCol = Math.max(1, sh.getLastColumn());
+    // Trim rows
+    const maxRows = sh.getMaxRows();
+    if (maxRows > lastRow + 50) { // keep a small buffer
+      try { sh.deleteRows(lastRow + 51, maxRows - (lastRow + 50)); } catch(_) {}
+    }
+    // Trim columns
+    const maxCols = sh.getMaxColumns();
+    if (maxCols > lastCol) {
+      try { sh.deleteColumns(lastCol + 1, maxCols - lastCol); } catch(_) {}
+    }
+  });
+  // Re-apply styles
+  styleWorkbook_();
+  SpreadsheetApp.getActive().toast('Sheets trimmed and visuals refreshed.', 'Funds');
+}
+
 /** =========================
  *  VISUAL STYLING
  *  ========================= */
@@ -146,6 +171,11 @@ function styleWorkbook_() {
     else if (n === 'Сборы') styleCollectionsSheet_(sh);
     else if (n === 'Семьи') styleFamiliesSheet_(sh);
     else if (n === 'Участие') styleParticipationSheet_(sh);
+    // Hide gridlines on display sheets
+    try {
+      if (n === 'Инструкция' || n === 'Баланс' || n === 'Детализация' || n === 'Сводка') sh.setHiddenGridlines(true);
+      else sh.setHiddenGridlines(false);
+    } catch (_) {}
   });
 }
 
@@ -275,7 +305,8 @@ function styleSheetHeader_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol < 1) return;
   const header = sh.getRange(1,1,1,lastCol);
-  header.setBackground('#f1f3f4').setFontWeight('bold').setHorizontalAlignment('center').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  header.setBackground('#f1f3f4').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  try { sh.setRowHeights(1, 1, 28); } catch(_) {}
   // Banding for data rows (start from row 2 to keep header style)
   const lastRow = sh.getLastRow();
   if (lastRow >= 2) {
@@ -408,13 +439,25 @@ function styleSummarySheet_(sh) {
   const lastRow = Math.max(sh.getLastRow(), 2);
   // Number formats
   ['Сумма цели','Собрано','Остаток до цели'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right'); });
-  ['Участников','Плательщиков','Ещё плательщиков до закрытия'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setHorizontalAlignment('center'); });
+  ['Участников','Плательщиков','Ещё плательщиков до закрытия'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('0').setHorizontalAlignment('center'); });
   if (map['collection_id']) sh.getRange(2, map['collection_id'], lastRow-1, 1).setHorizontalAlignment('center');
   // Conditional formatting for Остаток > 0
   if (map['Остаток до цели'] && lastRow > 1) {
     const rules = sh.getConditionalFormatRules();
     const rng = sh.getRange(2, map['Остаток до цели'], lastRow-1, 1);
     rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground('#fff4e5').setRanges([rng]).build());
+    // NeedMore: 0 = green, >0 = orange
+    if (map['Ещё плательщиков до закрытия']) {
+      const rng2 = sh.getRange(2, map['Ещё плательщиков до закрытия'], lastRow-1, 1);
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberEqualTo(0).setBackground('#e6f4ea').setRanges([rng2]).build());
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground('#fff4e5').setRanges([rng2]).build());
+    }
+    // Section header shading when ALL: detect by text in "Название сбора"
+    if (map['Название сбора']) {
+      const nameColRng = sh.getRange(2, map['Название сбора'], lastRow-1, 1);
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextContains('ОТКРЫТЫЕ СБОРЫ').setBackground('#e8f0fe').setRanges([nameColRng]).build());
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextContains('ЗАКРЫТЫЕ СБОРЫ').setBackground('#e8f0fe').setRanges([nameColRng]).build());
+    }
     sh.setConditionalFormatRules(rules);
   }
 }
@@ -538,7 +581,7 @@ function setupInstructionSheet() {
 
     ['▶ Выпадающие списки и ID', 'Выпадающие всегда показывают «Название (ID)». Внутри расчётов ID извлекается автоматически. Пустые ID генерируются при начале ввода или через меню «Generate IDs (all sheets)».'],
 
-    ['▶ Советы и проверка', 'Если дропдауны пустые — Funds → Rebuild data validations.\nЕсли «Начислено» неожиданно 0 — проверьте «Участие» и «Активен».\nЕсли «Баланс» не обновился — внесите/измените запись в «Платежи» или запустите Setup.']
+  ['▶ Советы и проверка', 'Если дропдауны пустые — Funds → Rebuild data validations.\nЕсли «Начислено» неожиданно 0 — проверьте «Участие» и «Активен».\nЕсли «Баланс» не обновился — внесите/измените запись в «Платежи» или запустите Setup.\nДля чистки лишних строк/колонок и обновления внешнего вида: Funds → Cleanup visuals (trim sheets).']
   ];
   sh.getRange(2,1,rows.length,2).setValues(rows);
   // Wrap text and align
@@ -784,7 +827,7 @@ function refreshBalanceFormulas_() {
   shBal.getRange(2, 6, rows, 1).setFormulas(formulasF);
 }
 
-function setupDetailSheet_() {
+function setupSummarySheet_() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName('Детализация');
   if (!sh) return;
@@ -801,7 +844,7 @@ function setupDetailSheet_() {
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
   // Tick cell to force recalc on demand
   sh.getRange('J2').setValue('Tick');
-  sh.getRange('K2').setValue(new Date().toISOString());
+  sh.getRange('J3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
   
   // Dynamic formulas starting from A2
   sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
@@ -1775,7 +1818,8 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
 
 /** Generate per-collection summary: [collection_id, name, mode, T_total, collected, K_payers, K_needed_more, remaining] */
 function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
-  const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
+  const statusNorm = String(statusFilter||'OPEN').toUpperCase();
+  const onlyOpen = statusNorm !== 'ALL';
   const ss = SpreadsheetApp.getActive();
   const shF = ss.getSheetByName('Семьи');
   const shC = ss.getSheetByName('Сборы');
@@ -1809,7 +1853,6 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     C.forEach(row => {
       const id = String(row[ci['collection_id']]||'').trim(); if (!id) return;
       const status = String(row[ci['Статус']]||'').trim();
-      if (onlyOpen && status !== 'Открыт') return;
       const name = String(row[ci['Название сбора']]||'').trim();
       const mode = String(row[ci['Начисление']]||'').trim();
       const T = Number(row[ci['Параметр суммы']]||0);
@@ -1817,7 +1860,10 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
       collections.push({id, name, mode, T, fixedX, status});
     });
   }
-  if (!collections.length) return [['','','','','','','','']];
+  // Filter by status for OPEN mode
+  let collectionsToProcess = collections;
+  if (onlyOpen) collectionsToProcess = collections.filter(c => c.status === 'Открыт');
+  if (!collectionsToProcess.length) return [['','','','','','','','']];
 
   // Participation
   const partByCol = new Map();
@@ -1852,8 +1898,7 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
     });
   }
 
-  const out = [];
-  collections.forEach(col => {
+  const buildRow = (col) => {
     const {id, name, mode, T, fixedX} = col;
     // participants
     const p = partByCol.get(id);
@@ -1900,7 +1945,7 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
       needMore = '';
     }
 
-    out.push([
+    return [
       id,
       name,
       mode,
@@ -1910,8 +1955,22 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
       K,
       needMore,
       round2_(remaining)
-    ]);
-  });
+    ];
+  };
+
+  const out = [];
+  if (statusNorm === 'ALL') {
+    // Open first
+    const openRows = collections.filter(c => c.status === 'Открыт').map(buildRow);
+    const closedRows = collections.filter(c => c.status !== 'Открыт').map(buildRow);
+    // Insert section headers as single labeled rows for clarity
+    if (openRows.length) out.push(['','ОТКРЫТЫЕ СБОРЫ','','','','','','','']);
+    Array.prototype.push.apply(out, openRows);
+    if (closedRows.length) out.push(['','ЗАКРЫТЫЕ СБОРЫ','','','','','','','']);
+    Array.prototype.push.apply(out, closedRows);
+  } else {
+    Array.prototype.push.apply(out, collectionsToProcess.map(buildRow));
+  }
 
   return out.length ? out : [['','','','','','','','']];
 }
