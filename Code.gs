@@ -1,6 +1,6 @@
 /** Funds tracker (1 family = 1 child) — production build
  * Modes: static_per_child (fixed per family), shared_total_all, shared_total_by_payers, dynamic_by_payers
- * Sheets: Инструкция, Семьи, Сборы, Участие, Платежи, Баланс, DynCalc, Lists(hidden)
+ * Sheets: Инструкция, Семьи, Сборы, Участие, Платежи, Баланс, Детализация, Сводка, Lists(hidden)
  * Dropdowns show "Название (ID)" everywhere; logic extracts IDs.
  * Dates matter only in Payments for reference; calculations are instant.
  *
@@ -68,8 +68,11 @@ function onEdit(e) {
       }
     }
     
-    // Detail sheet refresh for broader changes
-    if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация') refreshDetailSheet_();
+    // Detail & Summary sheet refresh for broader changes
+    if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация' || name === 'Сводка') {
+      refreshDetailSheet_();
+      refreshSummarySheet_();
+    }
     
     // Auto-generate IDs when user starts filling key fields
     if (name === 'Семьи') maybeAutoIdRow_(sh, e.range.getRow(), 'family_id', 'F', 3, ['Ребёнок ФИО']);
@@ -120,6 +123,9 @@ function init() {
   // Visual styling (headers, formats, filters, banding, conditional formats)
   styleWorkbook_();
 
+  // Remove legacy DynCalc sheet if present
+  try { const legacy = ss.getSheetByName('DynCalc'); if (legacy) ss.deleteSheet(legacy); } catch (_) {}
+
   SpreadsheetApp.getActive().toast('Structure created/updated.', 'Funds');
 }
 
@@ -128,13 +134,14 @@ function init() {
  *  ========================= */
 function styleWorkbook_() {
   const ss = SpreadsheetApp.getActive();
-  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация'];
+  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация','Сводка'];
   names.forEach(n => {
     const sh = ss.getSheetByName(n);
     if (!sh) return;
     styleSheetHeader_(sh);
     if (n === 'Баланс') styleBalanceSheet_(sh);
     else if (n === 'Детализация') styleDetailSheet_(sh);
+    else if (n === 'Сводка') styleSummarySheet_(sh);
     else if (n === 'Платежи') stylePaymentsSheet_(sh);
     else if (n === 'Сборы') styleCollectionsSheet_(sh);
     else if (n === 'Семьи') styleFamiliesSheet_(sh);
@@ -151,6 +158,8 @@ function addHeaderNotes_() {
     const notes = {
       'Ребёнок ФИО': 'Фамилия Имя Отчество ребёнка. Одна строка = одна семья (один ребёнок).',
   'День рождения': 'Дата рождения ребёнка (формат yyyy-mm-dd). Справочно.',
+  'Мама телеграм': 'Контакт мамы в Telegram (@username или ссылка).',
+  'Папа телеграм': 'Контакт папы в Telegram (@username или ссылка).',
       'Мама ФИО': 'Контакты и реквизиты родителей используются справочно.',
       'Активен': 'Да — семья участвует по умолчанию во всех открытых сборах, если не исключена в «Участие».',
       'Комментарий': 'Любая заметка по семье.',
@@ -230,6 +239,23 @@ function addHeaderNotes_() {
   'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x).',
       'Разность (±)': 'Оплачено − Начислено. Положительное — переплата, отрицательное — недоплата.',
   'Режим': 'Режим начисления: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers.'
+    };
+    setHeaderNotes_(sh, notes);
+  })();
+
+  // Сводка
+  (function(){
+    const sh = ss.getSheetByName('Сводка'); if (!sh) return;
+    const notes = {
+      'collection_id': 'ID сбора.',
+      'Название сбора': 'Имя из листа «Сборы».',
+      'Режим': 'Режим начисления сбора.',
+      'Сумма цели': 'Для shared_total_all/shared_total_by_payers/dynamic_by_payers — заданная цель T. Для static_per_child — N(участников) × ставка.',
+      'Собрано': 'Сумма платежей по сбору от участников (Σ платежей).',
+      'Участников': 'Число участников сбора (по правилам «Участие» и «Активен»).',
+      'Плательщиков': 'Количество участников, у которых сумма платежей > 0 (K).',
+  'Ещё плательщиков до закрытия': 'Оценка по режиму:\n• static_per_child: ceil(Остаток/ставка)\n• shared_total_all: ceil(Остаток/(T/N))\n• shared_total_by_payers: ceil(Остаток/доля), доля≈T/K (или фиксированный x)\n• dynamic_by_payers: ceil(Остаток/x) при зафиксированном x; иначе пусто',
+      'Остаток до цели': 'MAX(0, Сумма цели − Собрано).'
     };
     setHeaderNotes_(sh, notes);
   })();
@@ -376,6 +402,23 @@ function styleDetailSheet_(sh) {
   }
 }
 
+function styleSummarySheet_(sh) {
+  sh.setFrozenColumns(2);
+  const map = getHeaderMap_(sh);
+  const lastRow = Math.max(sh.getLastRow(), 2);
+  // Number formats
+  ['Сумма цели','Собрано','Остаток до цели'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right'); });
+  ['Участников','Плательщиков','Ещё плательщиков до закрытия'].forEach(h => { if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setHorizontalAlignment('center'); });
+  if (map['collection_id']) sh.getRange(2, map['collection_id'], lastRow-1, 1).setHorizontalAlignment('center');
+  // Conditional formatting for Остаток > 0
+  if (map['Остаток до цели'] && lastRow > 1) {
+    const rules = sh.getConditionalFormatRules();
+    const rng = sh.getRange(2, map['Остаток до цели'], lastRow-1, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground('#fff4e5').setRanges([rng]).build());
+    sh.setConditionalFormatRules(rules);
+  }
+}
+
 function getSheetsSpec() {
   return [
     {
@@ -387,12 +430,12 @@ function getSheetsSpec() {
       name: 'Семьи',
       headers: [
         'Ребёнок ФИО','День рождения',
-        'Мама ФИО','Мама телефон','Мама реквизиты',
-        'Папа ФИО','Папа телефон','Папа реквизиты',
+        'Мама ФИО','Мама телефон','Мама реквизиты','Мама телеграм',
+        'Папа ФИО','Папа телефон','Папа реквизиты','Папа телеграм',
         'Активен','Комментарий',
         'family_id'              // ID в конце: F001...
       ],
-      colWidths: [220,110,220,140,240,220,140,240,90,260,110],
+      colWidths: [220,110,220,140,240,160,220,140,240,160,90,260,110],
       dateCols: [2]
     },
     {
@@ -438,12 +481,11 @@ function getSheetsSpec() {
       colWidths: [120,200,120,200,120,120,120,150]
     },
     {
-      name: 'DynCalc',
+      name: 'Сводка',
       headers: [
-        'collection_id (label)','T (цель)','Σ платежей по сбору',
-        'x (уровень воды, DYN_CAP)','Комментарий'
+        'collection_id','Название сбора','Режим','Сумма цели','Собрано','Участников','Плательщиков','Ещё плательщиков до закрытия','Остаток до цели'
       ],
-      colWidths: [260,120,160,220,260]
+      colWidths: [120,260,180,140,140,120,150,220,150]
     },
     {
       name: 'Lists', // hidden
@@ -471,21 +513,23 @@ function setupInstructionSheet() {
   if (last > 1) sh.getRange(2,1,last-1, Math.max(2, sh.getLastColumn())).clearContent();
 
   const rows = [
-    ['▶ Быстрый старт', '1) Funds → Setup / Rebuild structure.\n2) Заполните «Семьи» (Активен=Да).\n3) Добавьте «Сборы» (Статус=Открыт).\n4) При необходимости настройте «Участие».\n5) Вносите «Платежи».\n6) Смотрите «Баланс».'],
-  ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО, День рождения (yyyy-mm-dd) и контакты. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
+    ['▶ О проекте', 'Версия: 0.1. Репозиторий: https://github.com/yobushka/paymentAccountingGoogleSheet'],
+    ['▶ Дисклеймер', 'Инструмент на ранней стадии и используется для личных целей; welcome to contribute. Внимание к персональным данным: передача ПДн через границу может быть незаконной. Google — иностранная компания; соблюдайте применимое законодательство.'],
+    ['▶ Быстрый старт', '1) Funds → Setup / Rebuild structure.\n2) Заполните «Семьи» (Активен=Да).\n3) Добавьте «Сборы» (Статус=Открыт).\n4) При необходимости настройте «Участие».\n5) Вносите «Платежи».\n6) Смотрите «Баланс» и «Детализация».\n7) «Сводка» — оперативные итоги по сборам.'],
+  ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО, День рождения (yyyy-mm-dd), Телеграм мамы/папы и контакты родителей. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
   ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). Можно указать «Ссылка на гуглдиск» (необязательно). Статус=Открыт — сбор учитывается в начислениях. Статус можно сменить на Закрыт после фиксации.'],
     ['3', 'Участие (опционально): если есть хотя бы один «Участвует», участвуют только отмеченные семьи. «Не участвует» всегда исключает семью. Если явных «Участвует» нет — участвуют все активные семьи.'],
     ['4', 'Платежи: выберите семью и сбор из выпадающих списков «Название (ID)». Сумма платежа должна быть > 0 (валидируется). Дата — справочная и на расчёты не влияет.'],
   ['5', 'Баланс: отображает по каждой семье «Оплачено всего», «Начислено всего», «Переплата (текущая)», «Задолженность».'],
     ['6', 'Демо-данные: Funds → Load Sample Data (separate) — добавит примеры семей, сборов, участия и платежей, чтобы увидеть механику сразу.'],
 
-  ['▶ Пересчёт', 'Если сменили режим начисления в «Сборы» или массово меняли «Участие»/«Платежи», выполните Funds → Recalculate (Balance & Detail), чтобы принудительно обновить «Баланс» и «Детализация». Баланс также авто‑обновляется при правках на листах «Платежи», «Семьи», «Сборы».'],
+  ['▶ Пересчёт', 'Если сменили режим/участие/платежи, выполните Funds → Recalculate (Balance & Detail). Обновятся «Баланс», «Детализация» и «Сводка». Баланс также авто‑обновляется при правках на листах «Платежи», «Семьи», «Сборы».'],
 
-    ['▶ Режимы начисления', 'Все расчёты моментальные и зависят от текущего состояния листов.'],
-    ['static_per_child', 'Фикс на семью. Начислено участнику = «Параметр суммы».\nПример: Параметр=500; участников 10 → каждому начислено 500; неучастникам — 0.'],
-  ['shared_total_all', 'Общая сумма T делится поровну между N участниками: начислено = T/N.\nПример: T=12 000; N=8 → каждому по 1 500.'],
-  ['shared_total_by_payers', 'Общая сумма T делится поровну между K оплатившими участниками: начислено = T/K только тем, у кого платежи > 0.\nПример: T=10 000; оплатили 4 семьи → каждому начислено 2 500; тем, кто не платил — 0.'],
-    ['dynamic_by_payers', 'Цель T распределяется только между платившими через cap x (water-filling): Σ min(P_i, x) = min(T, ΣP_i).\nПояснение: ранние переплаты выравниваются по мере поступления взносов остальных.\nПример: T=6 000; платежи = [2000,2000,700,700,700,700,700] → ΣP=7 500, x≈1 250: пять по 700 дают 3 500, два по 2000 дают 2×min(2000,1250)=2 500; итого 6 000. Начислено каждой семье = min(её платежа, x).'],
+    ['▶ Режимы начисления (подробно)', 'Все расчёты моментальные; поведение при 1/нескольких плательщиках:'],
+    ['static_per_child', 'Фикс на семью. Начислено участнику = «Параметр суммы».\n1 плательщик: всем участникам начислена ставка; у плательщика возможна переплата.\nНесколько плательщиков: начисление одинаково у всех участников.'],
+    ['shared_total_all', 'T/N на всех участников.\n1 плательщик: всем участникам начислено T/N; у плательщика возможна временная переплата.\nНесколько плательщиков: у всех одинаковое начисление = T/N.'],
+    ['shared_total_by_payers', 'T/K только для оплативших.\n1 плательщик: начисление = T (K=1); будет недоплата, если внесено < T.\nНесколько плательщиков: каждому платившему начислено T/K; не платившие = 0.'],
+    ['dynamic_by_payers', 'Water‑filling: Σ min(P_i, x) = min(T, ΣP_i). Начислено семье i = min(P_i, x).\n1 плательщик: начисление = его платёж (до T), долг не растёт.\nНесколько плательщиков: x выравнивает ранние переплаты; после закрытия используется «Фиксированный x».'],
 
     ['▶ Закрытие динамического сбора', 'Меню Funds → Close Collection. Введите collection_id (например, C003). Скрипт посчитает x (DYN_CAP) по фактическим платежам участников, запишет «Фиксированный x» и установит Статус=Закрыт. После закрытия используется зафиксированный x.'],
     ['DYN_CAP (формула)', 'DYN_CAP(T, payments_range) возвращает cap x по water-filling.\nПример: =DYN_CAP(6000, {2000,2000,700,700,700,700,700}) → 1250.'],
@@ -684,6 +728,8 @@ function setupBalanceExamples() {
   
   // Setup detail sheet
   setupDetailSheet_();
+  // Setup summary sheet
+  setupSummarySheet_();
 }
 
 function refreshBalanceFormulas_() {
@@ -777,6 +823,37 @@ function refreshDetailSheet_() {
   }
 }
 
+function setupSummarySheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Сводка');
+  if (!sh) return;
+  // Clear old data
+  const lastRow = sh.getLastRow();
+  if (lastRow > 1) sh.getRange(2, 1, lastRow-1, sh.getLastColumn()).clearContent();
+  // Selector and tick
+  sh.getRange('J1').setValue('Фильтр');
+  sh.getRange('K1').setValue('ALL');
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
+  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы)');
+  sh.getRange('J2').setValue('Tick');
+  sh.getRange('K2').setValue(new Date().toISOString());
+  // Array formula
+  sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
+  sh.getRange('J3').setValue('Сводка по сборам. Значения обновляются автоматически.');
+}
+
+function refreshSummarySheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Сводка');
+  if (!sh) return;
+  const current = sh.getRange('A2').getFormula();
+  if (current.includes('GENERATE_COLLECTION_SUMMARY')) {
+    sh.getRange('K2').setValue(new Date().toISOString());
+    sh.getRange('A2').setFormula(current);
+  }
+}
+
 /** Manual recalculation entry point */
 function recalculateAll() {
   try {
@@ -785,8 +862,12 @@ function recalculateAll() {
   const sh = SpreadsheetApp.getActive().getSheetByName('Детализация');
   if (sh) sh.getRange('K2').setValue(new Date().toISOString());
     refreshDetailSheet_();
-  SpreadsheetApp.getActive().toast('Balance and Detail recalculated.', 'Funds');
-  SpreadsheetApp.getUi().alert('Пересчёт завершён', 'Баланс и «Детализация» обновлены.', SpreadsheetApp.getUi().ButtonSet.OK);
+  // bump summary tick and refresh
+  const sh2 = SpreadsheetApp.getActive().getSheetByName('Сводка');
+  if (sh2) sh2.getRange('K2').setValue(new Date().toISOString());
+  refreshSummarySheet_();
+  SpreadsheetApp.getActive().toast('Balance, Detail and Summary recalculated.', 'Funds');
+  SpreadsheetApp.getUi().alert('Пересчёт завершён', 'Обновлены: «Баланс», «Детализация», «Сводка».', SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (e) {
     toastErr_('Recalculate failed: ' + e.message);
   SpreadsheetApp.getUi().alert('Ошибка пересчёта', String(e && e.message ? e.message : e), SpreadsheetApp.getUi().ButtonSet.OK);
@@ -967,18 +1048,18 @@ function loadSampleData_() {
 
   // Families (10 demo rows)
   const famStart = shF.getLastRow() + 1;
-  // Order per headers: ['Ребёнок ФИО','День рождения','Мама ФИО','Мама телефон','Мама реквизиты','Папа ФИО','Папа телефон','Папа реквизиты','Активен','Комментарий','family_id']
+  // Order per headers: ['Ребёнок ФИО','День рождения','Мама ФИО','Мама телефон','Мама реквизиты','Мама телеграм','Папа ФИО','Папа телефон','Папа реквизиты','Папа телеграм','Активен','Комментарий','family_id']
   const famRows = [
-    ['Иванов Иван', '2015-03-15', 'Иванова Анна','+7 900 000-00-01','****1111','Иванов Пётр','+7 900 000-10-01','****2222','Да','', ''],
-    ['Петров Пётр', '2015-06-02', 'Петрова Мария','+7 900 000-00-02','****3333','Петров Иван','+7 900 000-10-02','****4444','Да','', ''],
-    ['Сидорова Вера','2015-01-21','Сидорова Ольга','+7 900 000-00-03','****5555','Сидоров Антон','+7 900 000-10-03','****6666','Да','', ''],
-    ['Кузнецов Артём','2015-12-11','Кузнецова Ирина','+7 900 000-00-04','****7777','Кузнецов Олег','+7 900 000-10-04','****8888','Да','', ''],
-    ['Смирнова Юля','2015-08-05','Смирнова Анна','+7 900 000-00-05','****9999','Смирнов Роман','+7 900 000-10-05','****0001','Да','', ''],
-    ['Новикова Нина','2015-04-19','Новикова Оксана','+7 900 000-00-06','****0002','Новиков Павел','+7 900 000-10-06','****0003','Да','', ''],
-    ['Орлова Лена','2015-07-23','Орлова Татьяна','+7 900 000-00-07','****0004','Орлов Юрий','+7 900 000-10-07','****0005','Да','', ''],
-    ['Фёдоров Даня','2015-02-14','Фёдорова Алла','+7 900 000-00-08','****0006','Фёдоров Игорь','+7 900 000-10-08','****0007','Да','', ''],
-    ['Максимова Аня','2015-09-30','Максимова Ника','+7 900 000-00-09','****0008','Максимов Артём','+7 900 000-10-09','****0009','Да','', ''],
-    ['Егорова Саша','2015-11-01','Егорова Алина','+7 900 000-00-10','****0010','Егоров Кирилл','+7 900 000-10-10','****0011','Да','', '']
+    ['Иванов Иван', '2015-03-15', 'Иванова Анна','+7 900 000-00-01','****1111','@anna_ivanova','Иванов Пётр','+7 900 000-10-01','****2222','@petr_ivanov','Да','', ''],
+    ['Петров Пётр', '2015-06-02', 'Петрова Мария','+7 900 000-00-02','****3333','@petrova_m','Петров Иван','+7 900 000-10-02','****4444','@ivan_petrov','Да','', ''],
+    ['Сидорова Вера','2015-01-21','Сидорова Ольга','+7 900 000-00-03','****5555','@sidorova_olga','Сидоров Антон','+7 900 000-10-03','****6666','@sid_anton','Да','', ''],
+    ['Кузнецов Артём','2015-12-11','Кузнецова Ирина','+7 900 000-00-04','****7777','@irina_kuz','Кузнецов Олег','+7 900 000-10-04','****8888','@oleg_kuz','Да','', ''],
+    ['Смирнова Юля','2015-08-05','Смирнова Анна','+7 900 000-00-05','****9999','@anna_smir','Смирнов Роман','+7 900 000-10-05','****0001','@roman_smir','Да','', ''],
+    ['Новикова Нина','2015-04-19','Новикова Оксана','+7 900 000-00-06','****0002','@oks_nov','Новиков Павел','+7 900 000-10-06','****0003','@pavel_nov','Да','', ''],
+    ['Орлова Лена','2015-07-23','Орлова Татьяна','+7 900 000-00-07','****0004','@tat_orl','Орлов Юрий','+7 900 000-10-07','****0005','@y_orlov','Да','', ''],
+    ['Фёдоров Даня','2015-02-14','Фёдорова Алла','+7 900 000-00-08','****0006','@alla_fed','Фёдоров Игорь','+7 900 000-10-08','****0007','@igor_fed','Да','', ''],
+    ['Максимова Аня','2015-09-30','Максимова Ника','+7 900 000-00-09','****0008','@nika_maks','Максимов Артём','+7 900 000-10-09','****0009','@art_maks','Да','', ''],
+    ['Егорова Саша','2015-11-01','Егорова Алина','+7 900 000-00-10','****0010','@alina_egor','Егоров Кирилл','+7 900 000-10-10','****0011','@kir_egor','Да','', '']
   ];
   shF.getRange(famStart, 1, famRows.length, shF.getLastColumn()).setValues(famRows);
 
@@ -1687,6 +1768,149 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter, tick) {
         ]);
       }
     });
+  });
+
+  return out.length ? out : [['','','','','','','','']];
+}
+
+/** Generate per-collection summary: [collection_id, name, mode, T_total, collected, K_payers, K_needed_more, remaining] */
+function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
+  const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
+  const ss = SpreadsheetApp.getActive();
+  const shF = ss.getSheetByName('Семьи');
+  const shC = ss.getSheetByName('Сборы');
+  const shU = ss.getSheetByName('Участие');
+  const shP = ss.getSheetByName('Платежи');
+
+  const mapF = getHeaderMap_(shF);
+  const mapC = getHeaderMap_(shC);
+  const mapU = getHeaderMap_(shU);
+  const mapP = getHeaderMap_(shP);
+
+  // Families: id -> active
+  const families = new Map();
+  if (shF.getLastRow() >= 2) {
+    const F = shF.getRange(2, 1, shF.getLastRow()-1, shF.getLastColumn()).getValues();
+    const fi = {}; shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0].forEach((h,idx)=>fi[h]=idx);
+    F.forEach(r => {
+      const id = String(r[fi['family_id']]||'').trim();
+      if (!id) return;
+      const active = String(r[fi['Активен']]||'').trim() === 'Да';
+      const name = String(r[fi['Ребёнок ФИО']]||'').trim();
+      families.set(id, {active, name});
+    });
+  }
+
+  // Collections
+  const collections = [];
+  if (shC.getLastRow() >= 2) {
+    const C = shC.getRange(2, 1, shC.getLastRow()-1, shC.getLastColumn()).getValues();
+    const ci = {}; shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0].forEach((h,idx)=>ci[h]=idx);
+    C.forEach(row => {
+      const id = String(row[ci['collection_id']]||'').trim(); if (!id) return;
+      const status = String(row[ci['Статус']]||'').trim();
+      if (onlyOpen && status !== 'Открыт') return;
+      const name = String(row[ci['Название сбора']]||'').trim();
+      const mode = String(row[ci['Начисление']]||'').trim();
+      const T = Number(row[ci['Параметр суммы']]||0);
+      const fixedX = Number(row[ci['Фиксированный x']]||0);
+      collections.push({id, name, mode, T, fixedX, status});
+    });
+  }
+  if (!collections.length) return [['','','','','','','','']];
+
+  // Participation
+  const partByCol = new Map();
+  if (shU.getLastRow() >= 2) {
+    const U = shU.getRange(2, 1, shU.getLastRow()-1, shU.getLastColumn()).getValues();
+    const ui = {}; shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0].forEach((h,idx)=>ui[h]=idx);
+    U.forEach(r => {
+      const col = getIdFromLabelish_(String(r[ui['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[ui['family_id (label)']]||''));
+      const st = String(r[ui['Статус']]||'').trim();
+      if (!col || !fam) return;
+      if (!partByCol.has(col)) partByCol.set(col, {hasInclude:false, include:new Set(), exclude:new Set()});
+      const obj = partByCol.get(col);
+      if (st === 'Участвует') { obj.hasInclude = true; obj.include.add(fam); }
+      else if (st === 'Не участвует') { obj.exclude.add(fam); }
+    });
+  }
+
+  // Payments grouped
+  const payByCol = new Map();
+  if (shP.getLastRow() >= 2) {
+    const P = shP.getRange(2, 1, shP.getLastRow()-1, shP.getLastColumn()).getValues();
+    const pi = {}; shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0].forEach((h,idx)=>pi[h]=idx);
+    P.forEach(r => {
+      const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
+      const sum = Number(r[pi['Сумма']]||0);
+      if (!col || !fam || !(sum>0)) return;
+      if (!payByCol.has(col)) payByCol.set(col, new Map());
+      const m = payByCol.get(col);
+      m.set(fam, (m.get(fam)||0) + sum);
+    });
+  }
+
+  const out = [];
+  collections.forEach(col => {
+    const {id, name, mode, T, fixedX} = col;
+    // participants
+    const p = partByCol.get(id);
+    const participants = new Set();
+    if (p && p.hasInclude) p.include.forEach(fid=>participants.add(fid));
+    else families.forEach((v,fid)=>{ if (v.active) participants.add(fid); });
+    if (p) p.exclude.forEach(fid=>participants.delete(fid));
+    // Fallback: if none resolved, use payers as participants
+    if (participants.size === 0 && payByCol.has(id)) payByCol.get(id).forEach((_,fid)=>participants.add(fid));
+
+    const famPays = payByCol.get(id) || new Map();
+    // Collected from participants only
+    let collected = 0; let K = 0;
+    famPays.forEach((sum, fid)=>{ if (participants.has(fid)) { collected += sum; if (sum>0) K++; } });
+
+    // Target total
+    let Ttotal = 0;
+    if (mode === 'static_per_child') {
+      Ttotal = (participants.size || 0) * (T || 0);
+    } else {
+      Ttotal = T || 0;
+    }
+    Ttotal = Number(Ttotal) || 0;
+    const remaining = Math.max(0, round2_(Ttotal - collected));
+
+    // Estimate additional payers needed
+    let needMore = '';
+    if (remaining <= 0) {
+      needMore = 0;
+    } else if (mode === 'static_per_child') {
+      const rate = T || 0;
+      needMore = rate > 0 ? Math.ceil(remaining / rate) : '';
+    } else if (mode === 'shared_total_all') {
+      const n = participants.size || 0;
+      const share = (n > 0) ? (T / n) : 0;
+      needMore = share > 0 ? Math.ceil(remaining / share) : '';
+    } else if (mode === 'shared_total_by_payers') {
+      const share = fixedX > 0 ? fixedX : (K > 0 ? (T / K) : 0);
+      needMore = share > 0 ? Math.ceil(remaining / share) : '';
+    } else if (mode === 'dynamic_by_payers') {
+      // if x fixed (closed), estimate by x; else leave blank
+      needMore = fixedX > 0 ? Math.ceil(remaining / fixedX) : '';
+    } else {
+      needMore = '';
+    }
+
+    out.push([
+      id,
+      name,
+      mode,
+      round2_(Ttotal),
+      round2_(collected),
+      participants.size,
+      K,
+      needMore,
+      round2_(remaining)
+    ]);
   });
 
   return out.length ? out : [['','','','','','','','']];
