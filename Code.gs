@@ -1,5 +1,5 @@
 /** Funds tracker (1 family = 1 child) — production build
- * Modes: static_per_child (fixed per family), shared_total_all, dynamic_by_payers
+ * Modes: static_per_child (fixed per family), shared_total_all, shared_total_by_payers, dynamic_by_payers
  * Sheets: Инструкция, Семьи, Сборы, Участие, Платежи, Баланс, DynCalc, Lists(hidden)
  * Dropdowns show "Название (ID)" everywhere; logic extracts IDs.
  * Dates matter only in Payments for reference; calculations are instant.
@@ -7,6 +7,7 @@
  * Menu:
  *  • Setup / Rebuild structure
  *  • Rebuild data validations
+ *  • Recalculate (Balance & Detail)
  *  • Generate IDs (all sheets)
  *  • Close Collection (fix x & set Closed)
  *  • Load Sample Data (separate)  ← fills demo families, collections, participation, and payments
@@ -23,6 +24,7 @@ function onOpen() {
     .createMenu('Funds')
     .addItem('Setup / Rebuild structure', 'init')
     .addItem('Rebuild data validations', 'rebuildValidations')
+  .addItem('Recalculate (Balance & Detail)', 'recalculateAll')
     .addSeparator()
     .addItem('Generate IDs (all sheets)', 'generateAllIds')
     .addItem('Close Collection (fix x & set Closed)', 'closeCollectionPrompt')
@@ -39,8 +41,36 @@ function onEdit(e) {
     const sh = e && e.range && e.range.getSheet();
     if (!sh) return;
     const name = sh.getName();
-    if (name === 'Платежи' || name === 'Семьи' || name === 'Баланс') refreshBalanceFormulas_();
+    
+    // Only refresh Balance for significant changes, not every edit
+    if (name === 'Платежи') {
+      const col = e.range.getColumn();
+      const map = getHeaderMap_(sh);
+      // Only refresh if editing key columns: family, collection, amount
+      if (col === map['family_id (label)'] || col === map['collection_id (label)'] || col === map['Сумма']) {
+        refreshBalanceFormulas_();
+      }
+    } else if (name === 'Семьи') {
+      const col = e.range.getColumn();
+      const map = getHeaderMap_(sh);
+      // Only refresh if editing family_id or Активен status
+      if (col === map['family_id'] || col === map['Активен']) {
+        refreshBalanceFormulas_();
+      }
+    } else if (name === 'Сборы') {
+      // Mode/participants changes affect accruals; refresh Balance
+      refreshBalanceFormulas_();
+    } else if (name === 'Баланс') {
+      const col = e.range.getColumn();
+      // Only refresh if changing the selector
+      if (col === 9) { // Column I (selector)
+        refreshBalanceFormulas_();
+      }
+    }
+    
+    // Detail sheet refresh for broader changes
     if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация') refreshDetailSheet_();
+    
     // Auto-generate IDs when user starts filling key fields
     if (name === 'Семьи') maybeAutoIdRow_(sh, e.range.getRow(), 'family_id', 'F', 3, ['Ребёнок ФИО']);
     else if (name === 'Сборы') maybeAutoIdRow_(sh, e.range.getRow(), 'collection_id', 'C', 3, ['Название сбора']);
@@ -120,6 +150,7 @@ function addHeaderNotes_() {
     const sh = ss.getSheetByName('Семьи'); if (!sh) return;
     const notes = {
       'Ребёнок ФИО': 'Фамилия Имя Отчество ребёнка. Одна строка = одна семья (один ребёнок).',
+  'День рождения': 'Дата рождения ребёнка (формат yyyy-mm-dd). Справочно.',
       'Мама ФИО': 'Контакты и реквизиты родителей используются справочно.',
       'Активен': 'Да — семья участвует по умолчанию во всех открытых сборах, если не исключена в «Участие».',
       'Комментарий': 'Любая заметка по семье.',
@@ -136,11 +167,12 @@ function addHeaderNotes_() {
       'Статус': 'Открыт — участвует в начислениях; Закрыт — не влияет (кроме оплаты/возвратов).',
       'Дата начала': 'Справочно. На расчёты не влияет.',
       'Дедлайн': 'Справочно. На расчёты не влияет.',
-      'Начисление': 'Режим: static_per_child | shared_total_all | dynamic_by_payers.',
-      'Параметр суммы': 'Для static_per_child — фикс на семью; для shared_total_all — общая сумма T; для dynamic_by_payers — цель T.',
+  'Начисление': 'Режим: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers.',
+  'Параметр суммы': 'Для static_per_child — фикс на семью; для shared_total_all — общая сумма T; для shared_total_by_payers — общая сумма T (делится поровну между оплатившими); для dynamic_by_payers — цель T.',
       'Фиксированный x': 'Для dynamic_by_payers — x после закрытия (Close Collection). До закрытия считается динамически.',
       'Комментарий': 'Любая заметка по сбору.',
-      'collection_id': 'Авто-ID сбора (генерируется при начале ввода). Не редактируйте.'
+  'collection_id': 'Авто-ID сбора (генерируется при начале ввода). Не редактируйте.',
+  'Ссылка на гуглдиск': 'Необязательная ссылка на папку/файл Google Drive, связанную со сбором.'
     };
     setHeaderNotes_(sh, notes);
   })();
@@ -182,6 +214,22 @@ function addHeaderNotes_() {
       'Оплачено всего': 'Сумма всех платежей семьи по всем сборам.',
   'Начислено всего': 'Итог начислений по всем сборам (открытые и закрытые), с учётом участия и режима.',
   'Задолженность': 'MAX(0, Начислено всего − Оплачено).'
+    };
+    setHeaderNotes_(sh, notes);
+  })();
+
+  // Детализация
+  (function(){
+    const sh = ss.getSheetByName('Детализация'); if (!sh) return;
+    const notes = {
+      'family_id': 'ID семьи. Строки формируются динамически для пар семья↔сбор.',
+      'Имя ребёнка': 'Имя из листа «Семьи».',
+      'collection_id': 'ID сбора. Только те, что попадают под фильтр (K1).',
+      'Название сбора': 'Имя из листа «Сборы».',
+      'Оплачено': 'Сумма платежей семьи в этот сбор.',
+  'Начислено': 'Начислено по правилам сбора и участию: static — фикс, shared_total_all — T/N, shared_total_by_payers — T/K (только оплатившим), dynamic — min(P_i, x).',
+      'Разность (±)': 'Оплачено − Начислено. Положительное — переплата, отрицательное — недоплата.',
+  'Режим': 'Режим начисления: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers.'
     };
     setHeaderNotes_(sh, notes);
   })();
@@ -280,6 +328,7 @@ function styleFamiliesSheet_(sh) {
   sh.setFrozenColumns(1);
   const map = getHeaderMap_(sh);
   const lastRow = Math.max(sh.getLastRow(), 2);
+  if (map['День рождения']) sh.getRange(2, map['День рождения'], lastRow-1, 1).setNumberFormat('yyyy-mm-dd');
   if (map['Активен']) sh.getRange(2, map['Активен'], lastRow-1, 1).setHorizontalAlignment('center');
   if (map['family_id']) sh.getRange(2, map['family_id'], lastRow-1, 1).setHorizontalAlignment('center');
   // Conditional formatting for Активен
@@ -337,13 +386,14 @@ function getSheetsSpec() {
     {
       name: 'Семьи',
       headers: [
-        'Ребёнок ФИО',
+        'Ребёнок ФИО','День рождения',
         'Мама ФИО','Мама телефон','Мама реквизиты',
         'Папа ФИО','Папа телефон','Папа реквизиты',
         'Активен','Комментарий',
         'family_id'              // ID в конце: F001...
       ],
-      colWidths: [220,220,140,240,220,140,240,90,260,110]
+      colWidths: [220,110,220,140,240,220,140,240,90,260,110],
+      dateCols: [2]
     },
     {
       name: 'Сборы',
@@ -351,10 +401,10 @@ function getSheetsSpec() {
         'Название сбора','Статус',
         'Дата начала','Дедлайн',
         'Начисление','Параметр суммы','Фиксированный x','Комментарий',
-        'collection_id'
+        'collection_id','Ссылка на гуглдиск'
       ],
-      // Начисление: static_per_child | shared_total_all | dynamic_by_payers
-      colWidths: [260,120,110,110,220,150,140,260,120],
+      // Начисление: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers
+      colWidths: [260,120,110,110,220,150,140,260,120,300],
       dateCols: [3,4]
     },
     {
@@ -422,16 +472,19 @@ function setupInstructionSheet() {
 
   const rows = [
     ['▶ Быстрый старт', '1) Funds → Setup / Rebuild structure.\n2) Заполните «Семьи» (Активен=Да).\n3) Добавьте «Сборы» (Статус=Открыт).\n4) При необходимости настройте «Участие».\n5) Вносите «Платежи».\n6) Смотрите «Баланс».'],
-    ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО и контакты. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
-    ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). Статус=Открыт — сбор учитывается в начислениях. Статус можно сменить на Закрыт после фиксации.'],
+  ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО, День рождения (yyyy-mm-dd) и контакты. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
+  ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). Можно указать «Ссылка на гуглдиск» (необязательно). Статус=Открыт — сбор учитывается в начислениях. Статус можно сменить на Закрыт после фиксации.'],
     ['3', 'Участие (опционально): если есть хотя бы один «Участвует», участвуют только отмеченные семьи. «Не участвует» всегда исключает семью. Если явных «Участвует» нет — участвуют все активные семьи.'],
     ['4', 'Платежи: выберите семью и сбор из выпадающих списков «Название (ID)». Сумма платежа должна быть > 0 (валидируется). Дата — справочная и на расчёты не влияет.'],
   ['5', 'Баланс: отображает по каждой семье «Оплачено всего», «Начислено всего», «Переплата (текущая)», «Задолженность».'],
     ['6', 'Демо-данные: Funds → Load Sample Data (separate) — добавит примеры семей, сборов, участия и платежей, чтобы увидеть механику сразу.'],
 
+  ['▶ Пересчёт', 'Если сменили режим начисления в «Сборы» или массово меняли «Участие»/«Платежи», выполните Funds → Recalculate (Balance & Detail), чтобы принудительно обновить «Баланс» и «Детализация». Баланс также авто‑обновляется при правках на листах «Платежи», «Семьи», «Сборы».'],
+
     ['▶ Режимы начисления', 'Все расчёты моментальные и зависят от текущего состояния листов.'],
     ['static_per_child', 'Фикс на семью. Начислено участнику = «Параметр суммы».\nПример: Параметр=500; участников 10 → каждому начислено 500; неучастникам — 0.'],
-    ['shared_total_all', 'Общая сумма T делится поровну между N участниками: начислено = T/N.\nПример: T=12 000; N=8 → каждому по 1 500.'],
+  ['shared_total_all', 'Общая сумма T делится поровну между N участниками: начислено = T/N.\nПример: T=12 000; N=8 → каждому по 1 500.'],
+  ['shared_total_by_payers', 'Общая сумма T делится поровну между K оплатившими участниками: начислено = T/K только тем, у кого платежи > 0.\nПример: T=10 000; оплатили 4 семьи → каждому начислено 2 500; тем, кто не платил — 0.'],
     ['dynamic_by_payers', 'Цель T распределяется только между платившими через cap x (water-filling): Σ min(P_i, x) = min(T, ΣP_i).\nПояснение: ранние переплаты выравниваются по мере поступления взносов остальных.\nПример: T=6 000; платежи = [2000,2000,700,700,700,700,700] → ΣP=7 500, x≈1 250: пять по 700 дают 3 500, два по 2000 дают 2×min(2000,1250)=2 500; итого 6 000. Начислено каждой семье = min(её платежа, x).'],
 
     ['▶ Закрытие динамического сбора', 'Меню Funds → Close Collection. Введите collection_id (например, C003). Скрипт посчитает x (DYN_CAP) по фактическим платежам участников, запишет «Фиксированный x» и установит Статус=Закрыт. После закрытия используется зафиксированный x.'],
@@ -467,7 +520,7 @@ function setupListsSheet() {
   const cStatusCol = colToLetter_(mapC['Статус']||3);
   const fNameCol = colToLetter_(mapF['Ребёнок ФИО']||2);
   const fIdCol   = colToLetter_(mapF['family_id']||1);
-  const fActiveCol = colToLetter_(mapF['Активен']||9);
+  const fActiveCol = colToLetter_(mapF['Активен']||10);
   // OPEN_COLLECTIONS labels in A2:A  (Name (ID) for open only)
   sh.getRange('A1').setValue('OPEN_COLLECTIONS');
   sh.getRange('A2').setFormula(
@@ -541,7 +594,7 @@ function rebuildValidations() {
   const lists = {
     statusOpenClosed: ['Открыт','Закрыт'],
     activeYesNo:      ['Да','Нет'],
-    accrualRules:     ['static_per_child','shared_total_all','dynamic_by_payers'],
+  accrualRules:     ['static_per_child','shared_total_all','shared_total_by_payers','dynamic_by_payers'],
     payMethods:       ['СБП','карта','наличные'],
     partStatus:       ['Участвует','Не участвует']
   };
@@ -603,14 +656,19 @@ function setupBalanceExamples() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName('Баланс');
 
-  // A2: список family_id из «Семьи» (автоспилл)
+  // A2: список family_id из «Семьи» (ограниченный диапазон)
   const shF = ss.getSheetByName('Семьи');
   const mapF = getHeaderMap_(shF);
   const idCol = colToLetter_(mapF['family_id']||1);
   const nameCol = colToLetter_(mapF['Ребёнок ФИО']||2);
-  sh.getRange('A2').setFormula(`=ARRAYFORMULA(IFERROR(FILTER(Семьи!${idCol}2:${idCol}, LEN(Семьи!${idCol}2:${idCol})), ))`);
-  // B2: Название семьи по ID (автоспилл по A2:A)
-  sh.getRange('B2').setFormula(`=ARRAYFORMULA(IF(LEN(A2:A)=0, "", IFERROR(VLOOKUP(A2:A, {Семьи!${idCol}2:${idCol}, Семьи!${nameCol}2:${nameCol}}, 2, FALSE), "")))`);
+  const famLastRow = shF.getLastRow();
+  
+  // Limit ARRAYFORMULA to actual data range instead of open-ended
+  if (famLastRow > 1) {
+    sh.getRange('A2').setFormula(`=ARRAYFORMULA(IFERROR(FILTER(Семьи!${idCol}2:${idCol}${famLastRow}, LEN(Семьи!${idCol}2:${idCol}${famLastRow})), ))`);
+  // Use array literal to ensure lookup table is [ID, Name] left-to-right even if ID column is to the right of Name
+  sh.getRange('B2').setFormula(`=ARRAYFORMULA(IF(LEN(A2:A)=0, "", IFERROR(VLOOKUP(A2:A, {Семьи!${idCol}2:${idCol}${famLastRow}, Семьи!${nameCol}2:${nameCol}${famLastRow}}, 2, FALSE), "")))`);
+  }
 
   // Селектор фильтра начислений: OPEN | ALL (по умолчанию — ALL)
   sh.getRange('H1').setValue('Фильтр начисления');
@@ -634,26 +692,46 @@ function refreshBalanceFormulas_() {
   const shFam = ss.getSheetByName('Семьи');
   const last = shFam.getLastRow();
   const famCount = Math.max(0, last - 1); // без заголовка
+
+  // Re-apply A2/B2 formulas (IDs and Names) to ensure correct lookup after structure changes
+  if (last > 1) {
+    const mapF = getHeaderMap_(shFam);
+    const idColLetter = colToLetter_(mapF['family_id']||1);
+    const nameColLetter = colToLetter_(mapF['Ребёнок ФИО']||2);
+    const famLastRow = last;
+    shBal.getRange('A2').setFormula(`=ARRAYFORMULA(IFERROR(FILTER(Семьи!${idColLetter}2:${idColLetter}${famLastRow}, LEN(Семьи!${idColLetter}2:${idColLetter}${famLastRow})), ))`);
+    shBal.getRange('B2').setFormula(`=ARRAYFORMULA(IF(LEN(A2:A)=0, "", IFERROR(VLOOKUP(A2:A, {Семьи!${idColLetter}2:${idColLetter}${famLastRow}, Семьи!${nameColLetter}2:${nameColLetter}${famLastRow}}, 2, FALSE), "")))`);
+  }
+  
+  // Clear old formulas beyond actual data first
+  const currentLastRow = shBal.getLastRow();
+  if (currentLastRow > 1) {
+    // Clear all formula columns completely
+    shBal.getRange(2, 3, currentLastRow - 1, 4).clearContent();
+  }
+  
   if (famCount === 0) return;
 
-  // Сформировать массив формул для C:F для требуемого числа строк
+  // Only create formulas for actual families (much more efficient)
   const rows = famCount;
   const formulasC = []; // текущая переплата = MAX(0, Оплачено - Списано)
   const formulasD = []; // Оплачено всего
   const formulasE = []; // списано (начислено)
   const formulasF = []; // Задолженность = MAX(0, Списано - Оплачено)
+  
   for (let i = 0; i < rows; i++) {
     const r = 2 + i;
-    // E: начислено/списано
-  // Use selector on Баланс!$I$1 with default fallback to "ALL"
-  formulasE.push([`=IFERROR(ACCRUED_FAMILY($A${r}, IF(LEN($I$1)=0, "ALL", $I$1)), 0)`]);
     // D: оплачено
     formulasD.push([`=IFERROR(PAYED_TOTAL_FAMILY($A${r}),0)`]);
+    // E: начислено/списано (with selector)
+    formulasE.push([`=IFERROR(ACCRUED_FAMILY($A${r}, IF(LEN($I$1)=0, "ALL", $I$1)), 0)`]);
     // C: текущая переплата
     formulasC.push([`=MAX(0, D${r} - E${r})`]);
     // F: задолженность
     formulasF.push([`=MAX(0, E${r} - D${r})`]);
   }
+  
+  // Set formulas only for actual family rows
   shBal.getRange(2, 3, rows, 1).setFormulas(formulasC);
   shBal.getRange(2, 4, rows, 1).setFormulas(formulasD);
   shBal.getRange(2, 5, rows, 1).setFormulas(formulasE);
@@ -691,6 +769,19 @@ function refreshDetailSheet_() {
   const current = sh.getRange('A2').getFormula();
   if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
     sh.getRange('A2').setFormula(current);
+  }
+}
+
+/** Manual recalculation entry point */
+function recalculateAll() {
+  try {
+    refreshBalanceFormulas_();
+    refreshDetailSheet_();
+  SpreadsheetApp.getActive().toast('Balance and Detail recalculated.', 'Funds');
+  SpreadsheetApp.getUi().alert('Пересчёт завершён', 'Баланс и «Детализация» обновлены.', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    toastErr_('Recalculate failed: ' + e.message);
+  SpreadsheetApp.getUi().alert('Ошибка пересчёта', String(e && e.message ? e.message : e), SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
@@ -868,18 +959,18 @@ function loadSampleData_() {
 
   // Families (10 demo rows)
   const famStart = shF.getLastRow() + 1;
-  // Order per headers: ['Ребёнок ФИО','Мама ФИО','Мама телефон','Мама реквизиты','Папа ФИО','Папа телефон','Папа реквизиты','Активен','Комментарий','family_id']
+  // Order per headers: ['Ребёнок ФИО','День рождения','Мама ФИО','Мама телефон','Мама реквизиты','Папа ФИО','Папа телефон','Папа реквизиты','Активен','Комментарий','family_id']
   const famRows = [
-    ['Иванов Иван', 'Иванова Анна','+7 900 000-00-01','****1111','Иванов Пётр','+7 900 000-10-01','****2222','Да','', ''],
-    ['Петров Пётр', 'Петрова Мария','+7 900 000-00-02','****3333','Петров Иван','+7 900 000-10-02','****4444','Да','', ''],
-    ['Сидорова Вера','Сидорова Ольга','+7 900 000-00-03','****5555','Сидоров Антон','+7 900 000-10-03','****6666','Да','', ''],
-    ['Кузнецов Артём','Кузнецова Ирина','+7 900 000-00-04','****7777','Кузнецов Олег','+7 900 000-10-04','****8888','Да','', ''],
-    ['Смирнова Юля','Смирнова Анна','+7 900 000-00-05','****9999','Смирнов Роман','+7 900 000-10-05','****0001','Да','', ''],
-    ['Новикова Нина','Новикова Оксана','+7 900 000-00-06','****0002','Новиков Павел','+7 900 000-10-06','****0003','Да','', ''],
-    ['Орлова Лена','Орлова Татьяна','+7 900 000-00-07','****0004','Орлов Юрий','+7 900 000-10-07','****0005','Да','', ''],
-    ['Фёдоров Даня','Фёдорова Алла','+7 900 000-00-08','****0006','Фёдоров Игорь','+7 900 000-10-08','****0007','Да','', ''],
-    ['Максимова Аня','Максимова Ника','+7 900 000-00-09','****0008','Максимов Артём','+7 900 000-10-09','****0009','Да','', ''],
-    ['Егорова Саша','Егорова Алина','+7 900 000-00-10','****0010','Егоров Кирилл','+7 900 000-10-10','****0011','Да','', '']
+    ['Иванов Иван', '2015-03-15', 'Иванова Анна','+7 900 000-00-01','****1111','Иванов Пётр','+7 900 000-10-01','****2222','Да','', ''],
+    ['Петров Пётр', '2015-06-02', 'Петрова Мария','+7 900 000-00-02','****3333','Петров Иван','+7 900 000-10-02','****4444','Да','', ''],
+    ['Сидорова Вера','2015-01-21','Сидорова Ольга','+7 900 000-00-03','****5555','Сидоров Антон','+7 900 000-10-03','****6666','Да','', ''],
+    ['Кузнецов Артём','2015-12-11','Кузнецова Ирина','+7 900 000-00-04','****7777','Кузнецов Олег','+7 900 000-10-04','****8888','Да','', ''],
+    ['Смирнова Юля','2015-08-05','Смирнова Анна','+7 900 000-00-05','****9999','Смирнов Роман','+7 900 000-10-05','****0001','Да','', ''],
+    ['Новикова Нина','2015-04-19','Новикова Оксана','+7 900 000-00-06','****0002','Новиков Павел','+7 900 000-10-06','****0003','Да','', ''],
+    ['Орлова Лена','2015-07-23','Орлова Татьяна','+7 900 000-00-07','****0004','Орлов Юрий','+7 900 000-10-07','****0005','Да','', ''],
+    ['Фёдоров Даня','2015-02-14','Фёдорова Алла','+7 900 000-00-08','****0006','Фёдоров Игорь','+7 900 000-10-08','****0007','Да','', ''],
+    ['Максимова Аня','2015-09-30','Максимова Ника','+7 900 000-00-09','****0008','Максимов Артём','+7 900 000-10-09','****0009','Да','', ''],
+    ['Егорова Саша','2015-11-01','Егорова Алина','+7 900 000-00-10','****0010','Егоров Кирилл','+7 900 000-10-10','****0011','Да','', '']
   ];
   shF.getRange(famStart, 1, famRows.length, shF.getLastColumn()).setValues(famRows);
 
@@ -888,11 +979,12 @@ function loadSampleData_() {
 
   // Collections (3 demo)
   const colStart = shC.getLastRow() + 1;
-  // Headers: ['Название сбора','Статус','Дата начала','Дедлайн','Начисление','Параметр суммы','Фиксированный x','Комментарий','collection_id']
+  // Headers: ['Название сбора','Статус','Дата начала','Дедлайн','Начисление','Параметр суммы','Фиксированный x','Комментарий','collection_id','Ссылка на гуглдиск']
   const colRows = [
-    ['Канцтовары сентябрь', 'Открыт', '', '', 'static_per_child', 500, '', 'Фикс 500₽ на семью', ''],
-    ['Новый год',           'Открыт', '', '', 'shared_total_all', 12000, '', 'Общая сумма делится на участников', ''],
-    ['Подарок учителю',     'Открыт', '', '', 'dynamic_by_payers', 9000, '', 'Динамический сбор по цели 9000₽', '']
+    ['Канцтовары сентябрь', 'Открыт', '', '', 'static_per_child', 500, '', 'Фикс 500₽ на семью', '', ''],
+    ['Новый год',           'Открыт', '', '', 'shared_total_all', 12000, '', 'Общая сумма делится на участников', '', ''],
+    ['Подарок учителю',     'Открыт', '', '', 'dynamic_by_payers', 9000, '', 'Динамический сбор по цели 9000₽', '', ''],
+    ['Фотосессия',          'Открыт', '', '', 'shared_total_by_payers', 10000, '', 'Сумма делится поровну между оплатившими', '', '']
   ];
   shC.getRange(colStart, 1, colRows.length, shC.getLastColumn()).setValues(colRows);
 
@@ -910,6 +1002,7 @@ function loadSampleData_() {
   const c1Label = cLabels.find(s => /\(C001\)$/.test(s)) || '';
   const c2Label = cLabels.find(s => /\(C002\)$/.test(s)) || '';
   const c3Label = cLabels.find(s => /\(C003\)$/.test(s)) || '';
+  const c4Label = cLabels.find(s => /\(C004\)$/.test(s)) || '';
 
   const partStart = shU.getLastRow() + 1;
   const partRows = [];
@@ -941,6 +1034,11 @@ function loadSampleData_() {
   const dynFamilies = allFam.slice(2); // первые двое исключены
   dynFamilies.slice(0,3).forEach((lbl,i) => payRows.push([toISO_(addDays(-6+i)), lbl, c3Label, 2000, 'СБП', 'Ранний платёж', '']));
   dynFamilies.slice(3,8).forEach((lbl,i) => payRows.push([toISO_(addDays(-1-i)), lbl, c3Label, 700,  'карта', 'Позже', '']));
+
+  // For C004 (shared_total_by_payers 10000): 4 families pay; начисление будет T/K=2500 только им
+  if (c4Label) {
+    allFam.slice(0,4).forEach((lbl,i) => payRows.push([toISO_(addDays(-4+i)), lbl, c4Label, 2500, i%2? 'карта':'СБП', 'Оплата доли', '']));
+  }
 
   if (payRows.length) {
     shP.getRange(payStart, 1, payRows.length, shP.getLastColumn()).setValues(payRows);
@@ -1177,8 +1275,14 @@ function ACCRUED_FAMILY(familyLabelOrId, statusFilter) {
       let accrued = 0;
       if (accrual === 'static_per_child') {
         accrued = participants.has(famId) ? paramT : 0;
-  } else if (accrual === 'shared_total_all') {
+      } else if (accrual === 'shared_total_all') {
         if (n > 0 && participants.has(famId)) accrued = paramT / n;
+      } else if (accrual === 'shared_total_by_payers') {
+        // Share T equally among payers (within participants)
+        const payers = [];
+        (payByCol.get(colId) || new Map()).forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) payers.push(fid); });
+        const k = payers.length;
+        if (k > 0 && participants.has(famId) && Pi > 0) accrued = paramT / k; else accrued = 0;
       } else if (accrual === 'dynamic_by_payers') {
         if (participants.has(famId) && n > 0) {
           // payments of participants only
@@ -1294,6 +1398,11 @@ function ACCRUED_BREAKDOWN(familyLabelOrId, statusFilter) {
         accrued = participants.has(famId) ? paramT : 0;
       } else if (accrual === 'shared_total_all') {
         if (n > 0 && participants.has(famId)) accrued = paramT / n;
+      } else if (accrual === 'shared_total_by_payers') {
+        const payers = [];
+        famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) payers.push(fid); });
+        const k = payers.length;
+        if (k > 0 && participants.has(famId) && (famPays.get(famId)||0) > 0) accrued = paramT / k; else accrued = 0;
       } else if (accrual === 'dynamic_by_payers') {
         if (participants.has(famId) && n > 0) {
           const payments = [];
@@ -1404,7 +1513,7 @@ function round6_(x){ return Math.round((x + Number.EPSILON) * 1e6) / 1e6; }
 function round2_(x){ return Math.round((x + Number.EPSILON) * 100) / 100; }
 function toastErr_(msg){ SpreadsheetApp.getActive().toast(msg, 'Funds (error)', 5); }
 
-/** Generate detailed payment/accrual breakdown for all families and collections */
+/** Generate detailed payment/accrual breakdown for all families and collections (batched, optimized) */
 function GENERATE_DETAIL_BREAKDOWN(statusFilter) {
   const onlyOpen = String(statusFilter||'OPEN').toUpperCase() !== 'ALL';
   const ss = SpreadsheetApp.getActive();
@@ -1413,84 +1522,166 @@ function GENERATE_DETAIL_BREAKDOWN(statusFilter) {
   const shU = ss.getSheetByName('Участие');
   const shP = ss.getSheetByName('Платежи');
 
+  // Read headers once
   const mapF = getHeaderMap_(shF);
   const mapC = getHeaderMap_(shC);
   const mapU = getHeaderMap_(shU);
   const mapP = getHeaderMap_(shP);
 
-  // Get all families
-  const families = new Map(); // id -> name
+  // Families: id -> {name, active}
+  const families = new Map();
   const famRows = shF.getLastRow();
   if (famRows >= 2) {
-    const vals = shF.getRange(2, 1, famRows - 1, shF.getLastColumn()).getValues();
-    const headers = shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0];
-    const i = {}; headers.forEach((h,idx)=>i[h]=idx);
-    vals.forEach(r=>{
-      const id = String(r[i['family_id']]||'').trim();
-      const name = String(r[i['Ребёнок ФИО']]||'').trim();
-      if (id) families.set(id, name);
+    const F = shF.getRange(2, 1, famRows - 1, shF.getLastColumn()).getValues();
+    const fi = {}; shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0].forEach((h,idx)=>fi[h]=idx);
+    F.forEach(r => {
+      const id = String(r[fi['family_id']]||'').trim();
+      if (!id) return;
+      const name = String(r[fi['Ребёнок ФИО']]||'').trim();
+      const active = String(r[fi['Активен']]||'').trim() === 'Да';
+      families.set(id, {name, active});
     });
   }
 
-  // Get all collections
-  const collections = new Map(); // id -> {name, status, accrual}
+  // Collections: id -> {name, status, accrual, T, fixedX}
+  const collections = new Map();
   const cRows = shC.getLastRow();
   if (cRows >= 2) {
     const C = shC.getRange(2, 1, cRows - 1, shC.getLastColumn()).getValues();
-    const ch = shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0];
-    const ci={}; ch.forEach((h,idx)=>ci[h]=idx);
-    C.forEach(row=>{
+    const ci = {}; shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0].forEach((h,idx)=>ci[h]=idx);
+    C.forEach(row => {
       const colId = String(row[ci['collection_id']]||'').trim();
-      const name = String(row[ci['Название сбора']]||'').trim();
-      const status = String(row[ci['Статус']]||'').trim();
+      if (!colId) return;
+      const status  = String(row[ci['Статус']]||'').trim();
+      if (onlyOpen && status !== 'Открыт') return;
       const accrual = String(row[ci['Начисление']]||'').trim();
-      if (colId && (!onlyOpen || status === 'Открыт')) {
-        collections.set(colId, {name, status, accrual});
-      }
+      const name    = String(row[ci['Название сбора']]||'').trim();
+      const paramT  = Number(row[ci['Параметр суммы']]||0);
+      const fixedX  = Number(row[ci['Фиксированный x']]||0);
+      collections.set(colId, {name, status, accrual, T: paramT, fixedX});
     });
   }
 
-  // Get payments by family/collection
-  const payments = new Map(); // "famId|colId" -> amount
+  if (collections.size === 0 || families.size === 0) return [['','','','','','','','']];
+
+  // Participation: per collection
+  const partByCol = new Map(); // colId -> {hasInclude, include:Set, exclude:Set}
+  const uRows = shU.getLastRow();
+  if (uRows >= 2) {
+    const U = shU.getRange(2, 1, uRows - 1, shU.getLastColumn()).getValues();
+    const ui = {}; shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0].forEach((h,idx)=>ui[h]=idx);
+    U.forEach(r => {
+      const col = getIdFromLabelish_(String(r[ui['collection_id (label)']]||''));
+      const fam = getIdFromLabelish_(String(r[ui['family_id (label)']]||''));
+      const st  = String(r[ui['Статус']]||'').trim();
+      if (!collections.has(col) || !fam) return;
+      if (!partByCol.has(col)) partByCol.set(col, {hasInclude:false, include:new Set(), exclude:new Set()});
+      const obj = partByCol.get(col);
+      if (st === 'Участвует') { obj.hasInclude = true; obj.include.add(fam); }
+      else if (st === 'Не участвует') { obj.exclude.add(fam); }
+    });
+  }
+
+  // Payments: per collection -> Map(famId -> sum)
+  const payByCol = new Map();
   const pRows = shP.getLastRow();
   if (pRows >= 2) {
     const P = shP.getRange(2, 1, pRows - 1, shP.getLastColumn()).getValues();
-    const ph = shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0];
-    const pi={}; ph.forEach((h,idx)=>pi[h]=idx);
-    P.forEach(r=>{
+    const pi = {}; shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0].forEach((h,idx)=>pi[h]=idx);
+    P.forEach(r => {
       const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
       const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
       const sum = Number(r[pi['Сумма']]||0);
-      if (col && fam && sum > 0) {
-        const key = `${fam}|${col}`;
-        payments.set(key, (payments.get(key)||0) + sum);
-      }
+      if (!collections.has(col) || !fam || !(sum > 0)) return;
+      if (!payByCol.has(col)) payByCol.set(col, new Map());
+      const m = payByCol.get(col);
+      m.set(fam, (m.get(fam)||0) + sum);
     });
   }
 
-  const result = [];
-  
-  // Generate rows for each family/collection combination where there's activity
-  families.forEach((famName, famId) => {
-    collections.forEach((colData, colId) => {
-      const key = `${famId}|${colId}`;
-      const paid = payments.get(key) || 0;
-      
-      // Calculate accrual for this specific combination
-      const accrued = getSingleAccrual_(famId, colId, statusFilter);
-      
-      // Include if there's payment or accrual
+  // Build participants per collection
+  const participantsByCol = new Map(); // colId -> Set(famId)
+  collections.forEach((col, colId) => {
+    const p = partByCol.get(colId);
+    const set = new Set();
+    if (p && p.hasInclude) p.include.forEach(f => set.add(f));
+    else {
+      // all active families by default
+      families.forEach((info, fid) => { if (info.active) set.add(fid); });
+    }
+    if (p) p.exclude.forEach(f => set.delete(f));
+    // Fallback: if empty, use payers for this collection
+    if (set.size === 0 && payByCol.has(colId)) payByCol.get(colId).forEach((_, fid) => set.add(fid));
+    participantsByCol.set(colId, set);
+  });
+
+  // Compute rows
+  const out = [];
+  collections.forEach((col, colId) => {
+    const name = col.name;
+    const accrual = col.accrual;
+    const T = col.T;
+    const fixedX = col.fixedX || 0;
+    const participants = participantsByCol.get(colId) || new Set();
+    const famPays = payByCol.get(colId) || new Map();
+
+    // Pre-compute x for dynamic_by_payers
+    let x = 0;
+    if (accrual === 'dynamic_by_payers') {
+      if (fixedX > 0) x = fixedX;
+      else {
+        const arr = [];
+        famPays.forEach((sum, fid) => { if (participants.has(fid) && sum > 0) arr.push(sum); });
+        x = DYN_CAP_(T, arr);
+      }
+    }
+
+    // Pre-compute K for shared_total_by_payers
+    let kPayers = 0;
+    if (accrual === 'shared_total_by_payers') {
+      famPays.forEach((sum, fid) => { if (participants.has(fid) && sum > 0) kPayers++; });
+    }
+
+    // Iterate only over union(participants, payers)
+    const famSet = new Set();
+    participants.forEach(fid => famSet.add(fid));
+    famPays.forEach((_, fid) => famSet.add(fid));
+
+    famSet.forEach(fid => {
+      const fam = families.get(fid);
+      const paid = famPays.get(fid) || 0;
+      let accrued = 0;
+      if (accrual === 'static_per_child') {
+        accrued = participants.has(fid) ? T : 0;
+      } else if (accrual === 'shared_total_all') {
+        const n = participants.size;
+        accrued = (n > 0 && participants.has(fid)) ? (T / n) : 0;
+      } else if (accrual === 'shared_total_by_payers') {
+        accrued = (kPayers > 0 && participants.has(fid) && paid > 0) ? (T / kPayers) : 0;
+      } else if (accrual === 'dynamic_by_payers') {
+        if (participants.has(fid) && x > 0) {
+          const Pi = paid;
+          accrued = Math.min(Pi, x);
+        } else {
+          accrued = 0;
+        }
+      }
       if (paid > 0 || accrued > 0) {
-        const diff = paid - accrued;
-        result.push([
-          famId, famName, colId, colData.name,
-          round2_(paid), round2_(accrued), round2_(diff), colData.accrual
+        out.push([
+          fid,
+          fam ? fam.name : '',
+          colId,
+          name,
+          round2_(paid),
+          round2_(accrued),
+          round2_(paid - accrued),
+          accrual
         ]);
       }
     });
   });
 
-  return result.length ? result : [['','','','','','','','']];
+  return out.length ? out : [['','','','','','','','']];
 }
 
 /** Calculate accrual for a specific family/collection pair */
@@ -1597,6 +1788,11 @@ function getSingleAccrual_(familyId, collectionId, statusFilter) {
     accrued = participants.has(familyId) ? collectionData.paramT : 0;
   } else if (collectionData.accrual === 'shared_total_all') {
     if (n > 0 && participants.has(familyId)) accrued = collectionData.paramT / n;
+  } else if (collectionData.accrual === 'shared_total_by_payers') {
+    // Share T equally among payers (within participants)
+    let k = 0;
+    famPays.forEach((sum, fid)=>{ if (participants.has(fid) && sum>0) k++; });
+    if (k > 0 && participants.has(familyId) && (famPays.get(familyId)||0) > 0) accrued = collectionData.paramT / k; else accrued = 0;
   } else if (collectionData.accrual === 'dynamic_by_payers') {
     if (participants.has(familyId) && n > 0) {
       const payments = [];
