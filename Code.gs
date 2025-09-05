@@ -37,7 +37,8 @@ function onOpen() {
     .addSubMenu(ui.createMenu('⚙️ Управление данными')
       .addItem('🆔 Сгенерировать ID (все листы)', 'generateAllIds')
       .addItem('🔒 Закрыть сбор (зафиксировать x и пометить «Закрыт»)', 'closeCollectionPrompt')
-      .addItem('📋 Дублировать сбор', 'duplicateCollection_'))
+  .addItem('📋 Дублировать сбор', 'duplicateCollection_')
+  .addItem('🧪 Проверить и исправить типы полей', 'auditAndFixFieldTypes'))
     .addSeparator()
     .addItem('🎲 Загрузить пример данных', 'loadSampleDataPrompt')
     .addItem('❓ Быстрая помощь', 'showQuickHelp_')
@@ -1041,6 +1042,105 @@ function rebuildValidations() {
   SpreadsheetApp.getActive().toast('Validations rebuilt.', 'Funds');
 }
 
+/** Audit and fix field types: remove accidental dropdowns on free-text/number/date fields and re-apply canonical validations */
+function auditAndFixFieldTypes() {
+  const ss = SpreadsheetApp.getActive();
+  let fixes = 0;
+
+  /** Helper: clear any data validation on a column range starting row 2 */
+  function clearValidation(sh, col) {
+    if (!sh || !col) return;
+    const last = Math.max(2, sh.getMaxRows());
+    const rng = sh.getRange(2, col, last - 1, 1);
+    // If there is validation, clear it
+    try {
+      const rules = rng.getDataValidations();
+      let hasAny = false;
+      for (let i = 0; i < rules.length; i++) { if (rules[i] && rules[i][0]) { hasAny = true; break; } }
+      if (hasAny) { rng.clearDataValidations(); fixes++; }
+    } catch (_) {}
+  }
+
+  // Families: ensure free text and date/boolean columns are not dropdowns except 'Активен'
+  (function(){
+    const sh = ss.getSheetByName('Семьи'); if (!sh) return;
+    const map = getHeaderMap_(sh);
+    // Date
+    if (map['День рождения']) {
+      clearValidation(sh, map['День рождения']);
+      // force date format
+      const last = Math.max(2, sh.getMaxRows());
+      sh.getRange(2, map['День рождения'], last - 1, 1).setNumberFormat('yyyy-mm-dd');
+    }
+    // Textual fields
+    ['Ребёнок ФИО','Мама ФИО','Мама телефон','Мама реквизиты','Мама телеграм','Папа ФИО','Папа телефон','Папа реквизиты','Папа телеграм','Комментарий'].forEach(h=>{
+      if (map[h]) clearValidation(sh, map[h]);
+    });
+    // ID must have no validation
+    if (map['family_id']) clearValidation(sh, map['family_id']);
+    // Активен keeps dropdown; will be reapplied by rebuildValidations()
+  })();
+
+  // Collections: preserve dropdowns only for controlled fields; clear on free text/number/date columns
+  (function(){
+    const sh = ss.getSheetByName('Сборы'); if (!sh) return;
+    const map = getHeaderMap_(sh);
+    // Dates
+    ['Дата начала','Дедлайн'].forEach(h=>{ if (map[h]) { clearValidation(sh, map[h]); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map[h], last-1, 1).setNumberFormat('yyyy-mm-dd'); }});
+    // Numbers
+    ['Параметр суммы','Фиксированный x'].forEach(h=>{ if (map[h]) { clearValidation(sh, map[h]); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map[h], last-1, 1).setNumberFormat('#,##0.00'); }});
+    // Texts
+    ['Название сбора','Комментарий','Ссылка на гуглдиск','Закупка из средств'].forEach(h=>{ if (map[h]) clearValidation(sh, map[h]); });
+    // Keep controlled dropdowns: Статус, Начисление, К выдаче детям, Возмещено — will be re-applied
+    ['Статус','Начисление','К выдаче детям','Возмещено'].forEach(h=>{ if (map[h]) { /* intentionally skip clearing */ } });
+    // ID
+    if (map['collection_id']) clearValidation(sh, map['collection_id']);
+  })();
+
+  // Participation: only 'Статус' should be dropdown; clear others (labels are text)
+  (function(){
+    const sh = ss.getSheetByName('Участие'); if (!sh) return;
+    const map = getHeaderMap_(sh);
+    if (map['collection_id (label)']) clearValidation(sh, map['collection_id (label)']);
+    if (map['family_id (label)']) clearValidation(sh, map['family_id (label)']);
+    if (map['Комментарий']) clearValidation(sh, map['Комментарий']);
+    // 'Статус' will be reinstated
+  })();
+
+  // Payments: keep dropdowns for labels and method, clear others; enforce number/date formats
+  (function(){
+    const sh = ss.getSheetByName('Платежи'); if (!sh) return;
+    const map = getHeaderMap_(sh);
+    // Date & number
+    if (map['Дата']) { clearValidation(sh, map['Дата']); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map['Дата'], last-1, 1).setNumberFormat('yyyy-mm-dd'); }
+    if (map['Сумма']) { /* will re-apply numeric validation after */ clearValidation(sh, map['Сумма']); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map['Сумма'], last-1, 1).setNumberFormat('#,##0.00'); }
+    // Texts
+    if (map['Комментарий']) clearValidation(sh, map['Комментарий']);
+    if (map['payment_id']) clearValidation(sh, map['payment_id']);
+    // Keep for rebuild: family_id (label), collection_id (label), Способ
+  })();
+
+  // Issues journal: keep dropdowns for labels and boolean; clear others; enforce number/date formats
+  (function(){
+    const sh = ss.getSheetByName('Выдача'); if (!sh) return;
+    const map = getHeaderMap_(sh);
+    if (map['Дата выдачи']) { clearValidation(sh, map['Дата выдачи']); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map['Дата выдачи'], last-1, 1).setNumberFormat('yyyy-mm-dd'); }
+    if (map['Единиц']) { clearValidation(sh, map['Единиц']); const last=Math.max(2, sh.getMaxRows()); sh.getRange(2, map['Единиц'], last-1, 1).setNumberFormat('0'); }
+    if (map['Кто выдал']) clearValidation(sh, map['Кто выдал']);
+    if (map['Комментарий']) clearValidation(sh, map['Комментарий']);
+    // Keep controlled dropdowns: collection_id (label), family_id (label), Выдано
+  })();
+
+  // Issuance status is generated; nothing to fix
+
+  // Re-apply canonical validations after cleanup
+  rebuildValidations();
+  // Re-apply styling to restore formats/banding/filters
+  try { styleWorkbook_(); } catch (_) {}
+
+  SpreadsheetApp.getActive().toast(`Audit complete. Fixed: ${fixes} columns with stray validations.`, 'Funds');
+}
+
 function setValidationList(sh, rowStart, col, values) {
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(values, true)
@@ -1278,14 +1378,26 @@ function setupIssueStatusSheet_() {
 
 function refreshIssueStatusSheet_() {
   const ss = SpreadsheetApp.getActive();
-  const sh = ss.getSheetByName('Статус выдачи');
-  if (!sh) return;
-  const f = sh.getRange('A2').getFormula();
-  if (f && f.indexOf('GENERATE_ISSUE_STATUS') >= 0) {
-    sh.getRange('A2').setFormula(f);
-    SpreadsheetApp.flush();
-    try { styleIssueStatusSheet_(sh); } catch(_) {}
+  let sh = ss.getSheetByName('Статус выдачи');
+  if (!sh) {
+    // Create sheet and headers from spec if missing
+    const spec = getSheetsSpec().find(s => s.name === 'Статус выдачи');
+    sh = ss.insertSheet('Статус выдачи');
+    if (spec) {
+      sh.setFrozenRows(1);
+      sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+      spec.colWidths?.forEach((w, i) => { if (w) sh.setColumnWidth(i + 1, w); });
+    }
   }
+  const cell = sh.getRange('A2');
+  const f = cell.getFormula();
+  if (!f || f.indexOf('GENERATE_ISSUE_STATUS') < 0) {
+    cell.setFormula('=GENERATE_ISSUE_STATUS()');
+  } else {
+    cell.setFormula(f);
+  }
+  SpreadsheetApp.flush();
+  try { styleSheetHeader_(sh); styleIssueStatusSheet_(sh); } catch(_) {}
 }
 
 /** =========================
