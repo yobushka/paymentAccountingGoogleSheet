@@ -74,6 +74,7 @@ function onEdit(e) {
     } else if (name === 'Сборы') {
       // Mode/participants changes affect accruals; refresh Balance
       refreshBalanceFormulas_();
+  refreshIssueStatusSheet_();
     } else if (name === 'Баланс') {
       const col = e.range.getColumn();
       // Only refresh if changing the selector
@@ -83,15 +84,16 @@ function onEdit(e) {
     }
     
     // Detail & Summary sheet refresh for broader changes
-    if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация' || name === 'Сводка') {
+    if (name === 'Платежи' || name === 'Семьи' || name === 'Сборы' || name === 'Участие' || name === 'Детализация' || name === 'Сводка' || name === 'Выдача') {
       refreshDetailSheet_();
       refreshSummarySheet_();
+      refreshIssueStatusSheet_();
     }
     
     // Auto-generate IDs when user starts filling key fields
     if (name === 'Семьи') maybeAutoIdRow_(sh, e.range.getRow(), 'family_id', 'F', 3, ['Ребёнок ФИО']);
     else if (name === 'Сборы') maybeAutoIdRow_(sh, e.range.getRow(), 'collection_id', 'C', 3, ['Название сбора']);
-    else if (name === 'Платежи') maybeAutoIdRow_(sh, e.range.getRow(), 'payment_id', 'PMT', 3, ['Дата','family_id (label)','collection_id (label)','Сумма']);
+  else if (name === 'Платежи') maybeAutoIdRow_(sh, e.range.getRow(), 'payment_id', 'PMT', 3, ['Дата','family_id (label)','collection_id (label)','Сумма']);
   } catch (err) {
     // silent guard
   }
@@ -120,6 +122,9 @@ function init() {
 
   // Hidden helper sheet with dynamic lists (labels)
   setupListsSheet();
+
+  // Setup issuance dashboard formulas/labels (safe if sheet missing)
+  try { setupIssueStatusSheet_(); } catch(_) {}
 
   // Named ranges (labels and raw ids if needed)
   ensureNamedRange('FAMILIES_LABELS',        'Lists!D2:D'); // all families labels
@@ -172,7 +177,7 @@ function cleanupWorkbook_() {
  *  ========================= */
 function styleWorkbook_() {
   const ss = SpreadsheetApp.getActive();
-  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация','Сводка'];
+  const names = ['Инструкция','Семьи','Сборы','Участие','Платежи','Баланс','Детализация','Сводка','Выдача','Статус выдачи'];
   names.forEach(n => {
     const sh = ss.getSheetByName(n);
     if (!sh) return;
@@ -184,6 +189,8 @@ function styleWorkbook_() {
     else if (n === 'Сборы') styleCollectionsSheet_(sh);
     else if (n === 'Семьи') styleFamiliesSheet_(sh);
     else if (n === 'Участие') styleParticipationSheet_(sh);
+    else if (n === 'Выдача') styleIssuesSheet_(sh);
+    else if (n === 'Статус выдачи') styleIssueStatusSheet_(sh);
     // Hide gridlines on display sheets
     try {
       if (n === 'Инструкция' || n === 'Баланс' || n === 'Детализация' || n === 'Сводка') sh.setHiddenGridlines(true);
@@ -454,6 +461,7 @@ function addHeaderNotes_() {
   'Начисление': '⚙️ Режим расчёта:\n• static_per_child - фикс на семью\n• shared_total_all - общая сумма на всех\n• shared_total_by_payers - на оплативших\n• dynamic_by_payers - динамическое выравнивание (water-filling)\n• proportional_by_payers - пропорционально платежам (без долгов)\n• unit_price_by_payers - поштучно: x=«Фиксированный x» (цена за единицу), списывается floor(P_i/x)*x (полными единицами) только у плативших',
       'Параметр суммы': '💰 Размер взноса или общая цель:\n• static_per_child: сумма с семьи\n• другие режимы: общая цель T',
   'Фиксированный x': '🔒 Для dynamic_by_payers — cap после закрытия (до закрытия рассчитывается автоматически).\nДля unit_price_by_payers — цена за одну единицу.',
+  'К выдаче детям': 'Да/Нет. Если Да и режим = unit_price_by_payers, активируется учёт выдачи штук (лист «Выдача») и дашборд «Статус выдачи».',
   'Закупка из средств': '🛒 Источник закупки: из каких денег была произведена закупка по этому сбору. Примеры: "Классный фонд", "Пожертвования", "Личные".',
   'Возмещено': '♻️ Отмечайте "Да", если закупка уже возмещена из собранных средств; "Нет" — если возмещение ещё предстоит.',
       'Комментарий': '📝 Описание сбора, цели, особенности.\nВидно участникам.',
@@ -729,6 +737,22 @@ function styleSummarySheet_(sh) {
   }
 }
 
+function styleIssuesSheet_(sh) {
+  const map = getHeaderMap_(sh);
+  const lastRow = Math.max(sh.getLastRow(), 2);
+  if (map['Дата выдачи']) sh.getRange(2, map['Дата выдачи'], lastRow-1, 1).setNumberFormat('yyyy-mm-dd');
+  if (map['Единиц']) sh.getRange(2, map['Единиц'], lastRow-1, 1).setNumberFormat('0').setHorizontalAlignment('center');
+  if (map['Выдано']) sh.getRange(2, map['Выдано'], lastRow-1, 1).setHorizontalAlignment('center');
+}
+
+function styleIssueStatusSheet_(sh) {
+  const map = getHeaderMap_(sh);
+  const lastRow = Math.max(sh.getLastRow(), 2);
+  ['x (цена)'].forEach(h=>{ if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('#,##0.00').setHorizontalAlignment('right'); });
+  ['Единиц требуется','Единиц оплачено','Единиц выдано','Остаток (шт)'].forEach(h=>{ if (map[h]) sh.getRange(2, map[h], lastRow-1, 1).setNumberFormat('0').setHorizontalAlignment('center'); });
+  if (map['collection_id']) sh.getRange(2, map['collection_id'], lastRow-1, 1).setHorizontalAlignment('center');
+}
+
 function getSheetsSpec() {
   return [
     {
@@ -753,14 +777,29 @@ function getSheetsSpec() {
       headers: [
         'Название сбора','Статус',
         'Дата начала','Дедлайн',
-        'Начисление','Параметр суммы','Фиксированный x',
+        'Начисление','Параметр суммы','Фиксированный x','К выдаче детям',
         'Закупка из средств','Возмещено',
         'Комментарий',
         'collection_id','Ссылка на гуглдиск'
       ],
   // Начисление: static_per_child | shared_total_all | shared_total_by_payers | dynamic_by_payers | proportional_by_payers | unit_price_by_payers
-      colWidths: [260,120,110,110,220,150,140,200,110,260,120,300],
+      colWidths: [260,120,110,110,220,150,140,150,200,110,260,120,300],
       dateCols: [3,4]
+    },
+    {
+      name: 'Выдача',
+      headers: [
+        'Дата выдачи','collection_id (label)','family_id (label)','Единиц','Кто выдал','Выдано','Комментарий'
+      ],
+      colWidths: [110,260,260,90,160,110,260],
+      dateCols: [1]
+    },
+    {
+      name: 'Статус выдачи',
+      headers: [
+        'collection_id','Название','Статус','x (цена)','Единиц требуется','Единиц оплачено','Единиц выдано','Остаток (шт)'
+      ],
+      colWidths: [120,260,110,110,140,140,140,130]
     },
     {
       name: 'Участие',
@@ -825,11 +864,11 @@ function setupInstructionSheet() {
   if (last > 1) sh.getRange(2,1,last-1, Math.max(2, sh.getLastColumn())).clearContent();
 
   const rows = [
-    ['▶ О проекте', 'Версия: 0.1. Репозиторий: https://github.com/yobushka/paymentAccountingGoogleSheet'],
+  ['▶ О проекте', 'Версия: 0.2. Репозиторий: https://github.com/yobushka/paymentAccountingGoogleSheet'],
     ['▶ Дисклеймер', 'Инструмент на ранней стадии и используется для личных целей; welcome to contribute. Внимание к персональным данным: передача ПДн через границу может быть незаконной. Google — иностранная компания; соблюдайте применимое законодательство.'],
     ['▶ Быстрый старт', '1) Funds → Setup / Rebuild structure.\n2) Заполните «Семьи» (Активен=Да).\n3) Добавьте «Сборы» (Статус=Открыт).\n4) При необходимости настройте «Участие».\n5) Вносите «Платежи».\n6) Смотрите «Баланс» и «Детализация».\n7) «Сводка» — оперативные итоги по сборам.'],
   ['1', 'Семьи: одна строка = одна семья (один ребёнок). Заполните ФИО, День рождения (yyyy-mm-dd), Телеграм мамы/папы и контакты родителей. Поставьте «Активен=Да», чтобы семья участвовала по умолчанию. ID генерируется автоматически при начале ввода или через меню Generate IDs.'],
-  ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). «Фиксированный x»: для dynamic_by_payers — cap после закрытия, для unit_price_by_payers — цена за единицу. Можно указать «Ссылка на гуглдиск». Статус=Открыт — участвует в начислениях.'],
+  ['2', 'Сборы: выберите «Начисление» и задайте «Параметр суммы» (ставка/цель). «Фиксированный x»: для dynamic_by_payers — cap после закрытия, для unit_price_by_payers — цена за единицу. «К выдаче детям» — включает учёт выдачи для поштучных сборов. Можно указать «Ссылка на гуглдиск». Статус=Открыт — участвует в начислениях.'],
   ['2.1', 'Закупка из средств / Возмещено: при необходимости фиксируйте закупку из собранных средств и отмечайте, возмещена ли сумма. Поля справочные.'],
     ['3', 'Участие (опционально): если есть хотя бы один «Участвует», участвуют только отмеченные семьи. «Не участвует» всегда исключает семью. Если явных «Участвует» нет — участвуют все активные семьи.'],
     ['4', 'Платежи: выберите семью и сбор из выпадающих списков «Название (ID)». Сумма платежа должна быть > 0 (валидируется). Дата — справочная и на расчёты не влияет.'],
@@ -845,6 +884,7 @@ function setupInstructionSheet() {
     ['dynamic_by_payers', 'Water‑filling: Σ min(P_i, x) = min(T, ΣP_i). Начислено семье i = min(P_i, x).\n1 плательщик: начисление = его платёж (до T), долг не растёт.\nНесколько плательщиков: x выравнивает ранние переплаты; после закрытия используется «Фиксированный x».'],
   ['proportional_by_payers', 'Пропорционально платежам: начисление i = min(P_i, T) при Σ начислений = min(ΣP_i, T), распределение по долям P_i/ΣP. Пока не достигнута цель — списывается весь платёж. При превышении цели — суммы уменьшаются равнопропорционально. Долг не образуется.'],
   ['unit_price_by_payers', 'Поштучная закупка: цена за единицу x берётся из «Фиксированный x». Начисление i = floor(P_i/x)*x (только полные единицы) только тем, кто платил. Частичный остаток < x остаётся как переплата без долга. Суммарная цель T — общая стоимость партии. Число единиц = ceil(T/x).'],
+  ['▶ Выдача единиц (опционально)', 'Для поштучных сборов отметьте «К выдаче детям» в «Сборы». Появятся листы «Выдача» (журнал вручений) и «Статус выдачи» (дашборд: сколько требуется/оплачено/выдано/остаток). Заполняйте журнал вручений вручную.'],
 
     ['▶ Закрытие динамического сбора', 'Меню Funds → Close Collection. Введите collection_id (например, C003). Скрипт посчитает x (DYN_CAP) по фактическим платежам участников, запишет «Фиксированный x» и установит Статус=Закрыт. После закрытия используется зафиксированный x.'],
     ['DYN_CAP (формула)', 'DYN_CAP(T, payments_range) возвращает cap x по water-filling.\nПример: =DYN_CAP(6000, {2000,2000,700,700,700,700,700}) → 1250.'],
@@ -970,6 +1010,8 @@ function rebuildValidations() {
   if (mapC['Начисление']) setValidationList(shC, 2, mapC['Начисление'], lists.accrualRules);
   // Сборы: Возмещено (Да/Нет)
   if (mapC['Возмещено']) setValidationList(shC, 2, mapC['Возмещено'], lists.activeYesNo);
+  // Сборы: К выдаче детям (Да/Нет)
+  if (mapC['К выдаче детям']) setValidationList(shC, 2, mapC['К выдаче детям'], lists.activeYesNo);
 
   // Участие: A=open collections labels, B=active families labels, C=Статус
   const shU = ss.getSheetByName('Участие');
@@ -985,6 +1027,16 @@ function rebuildValidations() {
   if (mapP['collection_id (label)']) setValidationNamedRange(shP, 2, mapP['collection_id (label)'], 'COLLECTIONS_LABELS');
   if (mapP['Способ'])                 setValidationList(shP, 2, mapP['Способ'], lists.payMethods);
   if (mapP['Сумма'])                  setValidationNumberGreaterThan(shP, 2, mapP['Сумма'], 0);
+
+  // Выдача: collection label (все сборы), family label (все семьи), Единиц > 0, Выдано Да/Нет
+  const shI = ss.getSheetByName('Выдача');
+  if (shI) {
+    const mapI = getHeaderMap_(shI);
+    if (mapI['collection_id (label)']) setValidationNamedRange(shI, 2, mapI['collection_id (label)'], 'COLLECTIONS_LABELS');
+    if (mapI['family_id (label)'])     setValidationNamedRange(shI, 2, mapI['family_id (label)'],     'FAMILIES_LABELS');
+    if (mapI['Единиц'])                setValidationNumberGreaterThan(shI, 2, mapI['Единиц'], 0);
+    if (mapI['Выдано'])                setValidationList(shI, 2, mapI['Выдано'], lists.activeYesNo);
+  }
 
   SpreadsheetApp.getActive().toast('Validations rebuilt.', 'Funds');
 }
@@ -1152,17 +1204,20 @@ function setupSummarySheet_() {
   // Clear old data
   const lastRow = sh.getLastRow();
   if (lastRow > 1) sh.getRange(2, 1, lastRow-1, sh.getLastColumn()).clearContent();
+  // Ensure legacy cells inside spill area are empty
+  try { sh.getRange('J2:J3').clearContent(); } catch(_) {}
   // Selector and tick
-  sh.getRange('J1').setValue('Фильтр');
+  // Place controls outside of data spill (A..J): keep values in K1/K2, put labels in L1/L2
+  sh.getRange('L1').setValue('Фильтр');
   sh.getRange('K1').setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(['OPEN','ALL'], true).setAllowInvalid(false).build();
   sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все сборы, сначала открытые, ниже — закрытые)');
-  sh.getRange('J2').setValue('Tick');
+  sh.getRange('L2').setValue('Tick');
   sh.getRange('K2').setValue(new Date().toISOString());
   // Array formula
   sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
-  sh.getRange('J3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
+  sh.getRange('L3').setValue('Сводка по сборам. ALL: сверху открытые, внизу закрытые (история).');
   SpreadsheetApp.flush();
   try { styleSheetHeader_(sh); styleSummarySheet_(sh); } catch(_) {}
 }
@@ -1174,6 +1229,8 @@ function refreshSummarySheet_() {
   const current = sh.getRange('A2').getFormula();
   if (current.includes('GENERATE_COLLECTION_SUMMARY')) {
     sh.getRange('K2').setValue(new Date().toISOString());
+  // Safety: ensure spill area cells are empty (legacy labels could block spill)
+  try { sh.getRange('J2:J3').clearContent(); } catch(_) {}
     sh.getRange('A2').setFormula(current);
     // Re-apply styles to ensure alternating colors and header shading persist after rebuild
     try {
@@ -1196,11 +1253,38 @@ function recalculateAll() {
   const sh2 = SpreadsheetApp.getActive().getSheetByName('Сводка');
   if (sh2) sh2.getRange('K2').setValue(new Date().toISOString());
   refreshSummarySheet_();
+  // refresh issuance status
+  refreshIssueStatusSheet_();
   SpreadsheetApp.getActive().toast('Balance, Detail and Summary recalculated.', 'Funds');
   SpreadsheetApp.getUi().alert('Пересчёт завершён', 'Обновлены: «Баланс», «Детализация», «Сводка».', SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (e) {
     toastErr_('Recalculate failed: ' + e.message);
   SpreadsheetApp.getUi().alert('Ошибка пересчёта', String(e && e.message ? e.message : e), SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+function setupIssueStatusSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Статус выдачи');
+  if (!sh) return;
+  // Clear previous data under headers
+  const last = sh.getLastRow();
+  if (last > 1) sh.getRange(2,1,last-1,Math.max(1, sh.getLastColumn())).clearContent();
+  // Place array formula
+  sh.getRange('A2').setFormula('=GENERATE_ISSUE_STATUS()');
+  SpreadsheetApp.flush();
+  try { styleSheetHeader_(sh); styleIssueStatusSheet_(sh); } catch(_) {}
+}
+
+function refreshIssueStatusSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('Статус выдачи');
+  if (!sh) return;
+  const f = sh.getRange('A2').getFormula();
+  if (f && f.indexOf('GENERATE_ISSUE_STATUS') >= 0) {
+    sh.getRange('A2').setFormula(f);
+    SpreadsheetApp.flush();
+    try { styleIssueStatusSheet_(sh); } catch(_) {}
   }
 }
 
@@ -2359,6 +2443,93 @@ function GENERATE_COLLECTION_SUMMARY(statusFilter, tick) {
   }
 
   return out.length ? out : [['','','','','','','','','','']];
+}
+
+/** Generate issuance status table for collections flagged for issuance */
+function GENERATE_ISSUE_STATUS() {
+  const ss = SpreadsheetApp.getActive();
+  const shC = ss.getSheetByName('Сборы');
+  const shP = ss.getSheetByName('Платежи');
+  const shI = ss.getSheetByName('Выдача');
+  if (!shC) return [['','','','','','','','']];
+
+  const out = [];
+
+  // Read collections
+  const mapC = getHeaderMap_(shC);
+  const rowsC = shC.getLastRow();
+  if (rowsC >= 2) {
+    const C = shC.getRange(2, 1, rowsC - 1, shC.getLastColumn()).getValues();
+    const ci = {}; shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0].forEach((h,idx)=>ci[h]=idx);
+
+    // Sum payments per collection
+    const payByCol = new Map();
+    if (shP) {
+      const rowsP = shP.getLastRow();
+      if (rowsP >= 2) {
+        const P = shP.getRange(2, 1, rowsP - 1, shP.getLastColumn()).getValues();
+        const pi = {}; shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0].forEach((h,idx)=>pi[h]=idx);
+        P.forEach(r=>{
+          const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+          const sum = Number(r[pi['Сумма']]||0);
+          if (!col || !(sum>0)) return;
+          payByCol.set(col, (payByCol.get(col)||0) + sum);
+        });
+      }
+    }
+
+    // Sum issued units per collection (Выдано=Да)
+    const issuedUnitsByCol = new Map();
+    if (shI) {
+      const mapI = getHeaderMap_(shI);
+      const rowsI = shI.getLastRow();
+      if (rowsI >= 2) {
+        const I = shI.getRange(2, 1, rowsI - 1, shI.getLastColumn()).getValues();
+        const ih = shI.getRange(1,1,1,shI.getLastColumn()).getValues()[0];
+        const ii={}; ih.forEach((h,idx)=>ii[h]=idx);
+        I.forEach(r=>{
+          const col = getIdFromLabelish_(String(r[ii['collection_id (label)']]||''));
+          const units = Number(r[ii['Единиц']]||0);
+          const ok = String(r[ii['Выдано']]||'').trim() === 'Да';
+          if (!col || !(units>0) || !ok) return;
+          issuedUnitsByCol.set(col, (issuedUnitsByCol.get(col)||0) + units);
+        });
+      }
+    }
+
+    C.forEach(row=>{
+      const id = String(row[ci['collection_id']]||'').trim();
+      if (!id) return;
+      const name = String(row[ci['Название сбора']]||'').trim();
+      const status = String(row[ci['Статус']]||'').trim();
+      const mode = String(row[ci['Начисление']]||'').trim();
+      const flagIssue = String(row[ci['К выдаче детям']]||'').trim() === 'Да';
+      const T = Number(row[ci['Параметр суммы']]||0);
+      const x = Number(row[ci['Фиксированный x']]||0);
+      if (!flagIssue) return; // only those enabled
+      if (mode !== 'unit_price_by_payers') return; // only per-unit
+      if (!(x>0)) return; // need valid unit price
+
+      const totalUnits = x>0 ? Math.ceil((T||0) / x) : '';
+      const collected = payByCol.get(id) || 0;
+      const unitsPaid = x>0 ? Math.floor(collected / x) : '';
+      const unitsIssued = issuedUnitsByCol.get(id) || 0;
+      const remainUnits = (typeof totalUnits === 'number') ? Math.max(0, totalUnits - unitsIssued) : '';
+
+      out.push([
+        id,
+        name,
+        status,
+        round2_(x),
+        totalUnits === '' ? '' : totalUnits,
+        unitsPaid === '' ? '' : unitsPaid,
+        unitsIssued,
+        remainUnits === '' ? '' : remainUnits
+      ]);
+    });
+  }
+
+  return out.length ? out : [['','','','','','','','']];
 }
 
 /** Calculate accrual for a specific family/collection pair */
