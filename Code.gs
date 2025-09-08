@@ -2563,6 +2563,8 @@ function GENERATE_ISSUE_STATUS() {
   const shC = ss.getSheetByName('Сборы');
   const shP = ss.getSheetByName('Платежи');
   const shI = ss.getSheetByName('Выдача');
+  const shF = ss.getSheetByName('Семьи');
+  const shU = ss.getSheetByName('Участие');
   if (!shC) return [['','','','','','','','']];
 
   const out = [];
@@ -2574,20 +2576,50 @@ function GENERATE_ISSUE_STATUS() {
     const C = shC.getRange(2, 1, rowsC - 1, shC.getLastColumn()).getValues();
     const ci = {}; shC.getRange(1,1,1,shC.getLastColumn()).getValues()[0].forEach((h,idx)=>ci[h]=idx);
 
-    // Sum payments per collection
-    const payByCol = new Map();
-    if (shP) {
-      const rowsP = shP.getLastRow();
-      if (rowsP >= 2) {
-        const P = shP.getRange(2, 1, rowsP - 1, shP.getLastColumn()).getValues();
-        const pi = {}; shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0].forEach((h,idx)=>pi[h]=idx);
-        P.forEach(r=>{
-          const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
-          const sum = Number(r[pi['Сумма']]||0);
-          if (!col || !(sum>0)) return;
-          payByCol.set(col, (payByCol.get(col)||0) + sum);
-        });
-      }
+    // Families active map (for default participation)
+    const familiesActive = new Map(); // fid -> active:boolean
+    if (shF && shF.getLastRow() >= 2) {
+      const F = shF.getRange(2, 1, shF.getLastRow()-1, shF.getLastColumn()).getValues();
+      const fi = {}; shF.getRange(1,1,1,shF.getLastColumn()).getValues()[0].forEach((h,idx)=>fi[h]=idx);
+      F.forEach(r => {
+        const fid = String(r[fi['family_id']]||'').trim();
+        if (!fid) return;
+        const active = String(r[fi['Активен']]||'').trim() === 'Да';
+        familiesActive.set(fid, active);
+      });
+    }
+
+    // Participation map: colId -> {hasInclude, include:Set, exclude:Set}
+    const partByCol = new Map();
+    if (shU && shU.getLastRow() >= 2) {
+      const U = shU.getRange(2, 1, shU.getLastRow()-1, shU.getLastColumn()).getValues();
+      const ui = {}; shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0].forEach((h,idx)=>ui[h]=idx);
+      U.forEach(r => {
+        const col = getIdFromLabelish_(String(r[ui['collection_id (label)']]||''));
+        const fam = getIdFromLabelish_(String(r[ui['family_id (label)']]||''));
+        const st  = String(r[ui['Статус']]||'').trim();
+        if (!col || !fam) return;
+        if (!partByCol.has(col)) partByCol.set(col, {hasInclude:false, include:new Set(), exclude:new Set()});
+        const obj = partByCol.get(col);
+        if (st === 'Участвует') { obj.hasInclude = true; obj.include.add(fam); }
+        else if (st === 'Не участвует') { obj.exclude.add(fam); }
+      });
+    }
+
+    // Payments per collection per family (to respect no pooling for units)
+    const payByColFam = new Map(); // colId -> Map(fid -> sum)
+    if (shP && shP.getLastRow() >= 2) {
+      const P = shP.getRange(2, 1, shP.getLastRow()-1, shP.getLastColumn()).getValues();
+      const pi = {}; shP.getRange(1,1,1,shP.getLastColumn()).getValues()[0].forEach((h,idx)=>pi[h]=idx);
+      P.forEach(r => {
+        const col = getIdFromLabelish_(String(r[pi['collection_id (label)']]||''));
+        const fam = getIdFromLabelish_(String(r[pi['family_id (label)']]||''));
+        const sum = Number(r[pi['Сумма']]||0);
+        if (!col || !fam || !(sum>0)) return;
+        if (!payByColFam.has(col)) payByColFam.set(col, new Map());
+        const m = payByColFam.get(col);
+        m.set(fam, (m.get(fam)||0) + sum);
+      });
     }
 
     // Sum issued units per collection (Выдано=Да)
@@ -2622,11 +2654,33 @@ function GENERATE_ISSUE_STATUS() {
       if (mode !== 'unit_price_by_payers') return; // only per-unit
       if (!(x>0)) return; // need valid unit price
 
+      // Participants resolution for this collection
+      const p = partByCol.get(id);
+      const participants = new Set();
+      if (p && p.hasInclude) p.include.forEach(fid => participants.add(fid));
+      else {
+        familiesActive.forEach((active, fid) => { if (active) participants.add(fid); });
+      }
+      if (p) p.exclude.forEach(fid => participants.delete(fid));
+      // Fallback: if empty, use payers for this collection
+      if (participants.size === 0 && payByColFam.has(id)) payByColFam.get(id).forEach((_, fid)=>participants.add(fid));
+
       const totalUnits = x>0 ? Math.ceil((T||0) / x) : '';
-      const collected = payByCol.get(id) || 0;
-      const unitsPaid = x>0 ? Math.floor(collected / x) : '';
+      // Units paid: sum over families floor(P_i/x), only among participants
+      let unitsPaid = '';
+      if (x > 0) {
+        let sumUnits = 0;
+        const famPays = payByColFam.get(id) || new Map();
+        famPays.forEach((sum, fid) => {
+          if (!participants.has(fid)) return;
+          if (sum > 0) sumUnits += Math.floor(sum / x);
+        });
+        unitsPaid = sumUnits;
+      }
       const unitsIssued = issuedUnitsByCol.get(id) || 0;
-      const remainUnits = (typeof totalUnits === 'number') ? Math.max(0, totalUnits - unitsIssued) : '';
+      // Remaining stock to issue = min(totalUnits, unitsPaid) - issued
+      const capUnits = (typeof totalUnits === 'number') ? totalUnits : unitsPaid;
+      const remainUnits = (unitsPaid === '' ? '' : Math.max(0, Math.min(capUnits, unitsPaid) - unitsIssued));
 
       out.push([
         id,
