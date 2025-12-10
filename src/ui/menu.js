@@ -43,8 +43,12 @@ function onOpen() {
     menu.addSeparator();
   }
   
-  // Управление бэкапами
-  menu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');
+  // Управление бэкапами и диагностика
+  const backupMenu = ui.createMenu('🛠 Maintenance');
+  backupMenu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');
+  backupMenu.addItem('Cleanup backup named ranges', 'cleanupBackupNamedRanges');
+  backupMenu.addItem('⚠️ Force migration reset', 'forceMigrationReset');
+  menu.addSubMenu(backupMenu);
   
   // Информация
   menu.addItem('About', 'showAbout_');
@@ -129,4 +133,87 @@ function showQuickBalanceCheck_() {
   } catch (e) {
     ui.alert('Ошибка', e.message, ui.ButtonSet.OK);
   }
+}
+
+/**
+ * Диагностика валидаций — показывает какие правила установлены на каких листах
+ */
+function diagnoseValidations_() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const version = detectVersion();
+  
+  let report = `Версия: ${version}\n\n`;
+  
+  // Список листов для проверки
+  const sheetsToCheck = [
+    { name: SHEET_NAMES.GOALS, cols: ['Начисление', 'Статус', 'Тип'] },
+    { name: SHEET_NAMES.COLLECTIONS, cols: ['Начисление', 'Статус'] },
+    { name: SHEET_NAMES.FAMILIES, cols: ['Активен'] },
+    { name: SHEET_NAMES.PAYMENTS, cols: ['Способ', 'family_id (label)', 'goal_id (label)', 'collection_id (label)'] },
+    { name: SHEET_NAMES.PARTICIPATION, cols: ['Статус', 'family_id (label)', 'goal_id (label)', 'collection_id (label)'] }
+  ];
+  
+  sheetsToCheck.forEach(sheetInfo => {
+    const sh = ss.getSheetByName(sheetInfo.name);
+    if (!sh) return;
+    
+    report += `📄 Лист: ${sheetInfo.name}\n`;
+    
+    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const headerMap = {};
+    headers.forEach((h, i) => headerMap[h] = i + 1);
+    
+    sheetInfo.cols.forEach(colName => {
+      const col = headerMap[colName];
+      if (!col) return;
+      
+      // Проверяем ячейку строки 2 (первая строка данных)
+      const cell = sh.getRange(2, col);
+      const validation = cell.getDataValidation();
+      const value = cell.getValue();
+      
+      report += `  • ${colName} (col ${col}): `;
+      
+      if (validation) {
+        const criteriaType = validation.getCriteriaType();
+        const criteriaValues = validation.getCriteriaValues();
+        
+        if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          report += `LIST [${criteriaValues[0].join(', ')}]`;
+        } else if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+          report += `RANGE ${criteriaValues[0].getA1Notation()}`;
+        } else {
+          report += criteriaType.toString();
+        }
+        
+        // Проверяем, подходит ли текущее значение
+        if (value && criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          const allowedValues = criteriaValues[0];
+          if (!allowedValues.includes(value)) {
+            report += ` ⚠️ VALUE "${value}" NOT IN LIST!`;
+          }
+        }
+      } else {
+        report += 'NO VALIDATION';
+      }
+      
+      if (value) {
+        report += ` (value: "${value}")`;
+      }
+      report += '\n';
+    });
+    
+    report += '\n';
+  });
+  
+  // Также проверим именованные диапазоны
+  report += '📋 Именованные диапазоны:\n';
+  const namedRanges = ss.getNamedRanges();
+  namedRanges.forEach(nr => {
+    report += `  • ${nr.getName()}: ${nr.getRange().getA1Notation()}\n`;
+  });
+  
+  Logger.log(report);
+  ui.alert('Diagnose Validations', report.substring(0, 4000), ui.ButtonSet.OK);
 }

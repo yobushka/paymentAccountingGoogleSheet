@@ -1,7 +1,7 @@
 /**
  * @fileoverview Payment Accounting for Google Sheets v2.0
  * 
- * Автоматически сгенерировано из модулей: 2025-12-10T22:32:23.667Z
+ * Автоматически сгенерировано из модулей: 2025-12-10T22:58:41.693Z
  * 
  * НЕ РЕДАКТИРУЙТЕ ЭТОТ ФАЙЛ НАПРЯМУЮ!
  * Вносите изменения в модули в папке src/ и запускайте build.js
@@ -2761,6 +2761,8 @@ function rebuildValidations() {
   const ss = SpreadsheetApp.getActive();
   const version = detectVersion();
   
+  Logger.log('Rebuilding validations. Detected version: ' + version);
+  
   const lists = {
     // v2.0 статусы целей
     goalStatus: [GOAL_STATUS.OPEN, GOAL_STATUS.CLOSED, GOAL_STATUS.CANCELLED],
@@ -2782,6 +2784,8 @@ function rebuildValidations() {
     payMethods: PAYMENT_METHODS,
     partStatus: [PARTICIPATION_STATUS.PARTICIPATES, PARTICIPATION_STATUS.NOT_PARTICIPATES]
   };
+  
+  Logger.log('Accrual rules for v2: ' + JSON.stringify(lists.accrualRules));
   
   // Семьи: Активен
   const shF = ss.getSheetByName(SHEET_NAMES.FAMILIES);
@@ -2818,42 +2822,56 @@ function rebuildValidations() {
  */
 function setupGoalsValidations_(ss, lists) {
   const sh = ss.getSheetByName(SHEET_NAMES.GOALS);
-  if (!sh) return;
+  if (!sh) {
+    Logger.log('Sheet "Цели" not found for validations.');
+    return;
+  }
+  
+  Logger.log('Setting up validations for sheet "Цели"...');
   
   const map = getHeaderMap_(sh);
   const maxRows = sh.getMaxRows();
   
+  Logger.log('Headers map: ' + JSON.stringify(map));
+  Logger.log('Max rows: ' + maxRows);
+  
   // Очищаем старые валидации перед установкой новых (для миграции v1→v2)
-  const clearCol = (col) => {
+  const clearCol = (col, colName) => {
     if (col && maxRows > 1) {
+      Logger.log(`  Clearing validations in column ${col} (${colName})...`);
       sh.getRange(2, col, maxRows - 1, 1).clearDataValidations();
     }
   };
   
   if (map['Тип']) {
-    clearCol(map['Тип']);
+    clearCol(map['Тип'], 'Тип');
     setValidationList_(sh, 2, map['Тип'], lists.goalTypes);
+    Logger.log(`  Set validation "Тип" in column ${map['Тип']}: ${JSON.stringify(lists.goalTypes)}`);
   }
   if (map['Статус']) {
-    clearCol(map['Статус']);
+    clearCol(map['Статус'], 'Статус');
     setValidationList_(sh, 2, map['Статус'], lists.goalStatus);
+    Logger.log(`  Set validation "Статус" in column ${map['Статус']}: ${JSON.stringify(lists.goalStatus)}`);
   }
   if (map['Начисление']) {
-    clearCol(map['Начисление']);
+    clearCol(map['Начисление'], 'Начисление');
     setValidationList_(sh, 2, map['Начисление'], lists.accrualRules);
+    Logger.log(`  Set validation "Начисление" in column ${map['Начисление']}: ${JSON.stringify(lists.accrualRules)}`);
   }
   if (map['К выдаче детям']) {
-    clearCol(map['К выдаче детям']);
+    clearCol(map['К выдаче детям'], 'К выдаче детям');
     setValidationList_(sh, 2, map['К выдаче детям'], lists.activeYesNo);
   }
   if (map['Возмещено']) {
-    clearCol(map['Возмещено']);
+    clearCol(map['Возмещено'], 'Возмещено');
     setValidationList_(sh, 2, map['Возмещено'], lists.activeYesNo);
   }
   if (map['Периодичность']) {
-    clearCol(map['Периодичность']);
+    clearCol(map['Периодичность'], 'Периодичность');
     setValidationList_(sh, 2, map['Периодичность'], lists.periodicity);
   }
+  
+  Logger.log('Validations for "Цели" completed.');
 }
 
 /**
@@ -3721,6 +3739,7 @@ function onOpen() {
   menu.addItem('Quick Help', 'showQuickHelp_');
   menu.addItem('Quick Balance Check', 'showQuickBalanceCheck_');
   menu.addItem('Migration Report', 'showMigrationReport_');
+  menu.addItem('🔍 Diagnose Validations', 'diagnoseValidations_');
   
   menu.addSeparator();
   
@@ -3816,6 +3835,89 @@ function showQuickBalanceCheck_() {
   } catch (e) {
     ui.alert('Ошибка', e.message, ui.ButtonSet.OK);
   }
+}
+
+/**
+ * Диагностика валидаций — показывает какие правила установлены на каких листах
+ */
+function diagnoseValidations_() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const version = detectVersion();
+  
+  let report = `Версия: ${version}\n\n`;
+  
+  // Список листов для проверки
+  const sheetsToCheck = [
+    { name: SHEET_NAMES.GOALS, cols: ['Начисление', 'Статус', 'Тип'] },
+    { name: SHEET_NAMES.COLLECTIONS, cols: ['Начисление', 'Статус'] },
+    { name: SHEET_NAMES.FAMILIES, cols: ['Активен'] },
+    { name: SHEET_NAMES.PAYMENTS, cols: ['Способ', 'family_id (label)', 'goal_id (label)', 'collection_id (label)'] },
+    { name: SHEET_NAMES.PARTICIPATION, cols: ['Статус', 'family_id (label)', 'goal_id (label)', 'collection_id (label)'] }
+  ];
+  
+  sheetsToCheck.forEach(sheetInfo => {
+    const sh = ss.getSheetByName(sheetInfo.name);
+    if (!sh) return;
+    
+    report += `📄 Лист: ${sheetInfo.name}\n`;
+    
+    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const headerMap = {};
+    headers.forEach((h, i) => headerMap[h] = i + 1);
+    
+    sheetInfo.cols.forEach(colName => {
+      const col = headerMap[colName];
+      if (!col) return;
+      
+      // Проверяем ячейку строки 2 (первая строка данных)
+      const cell = sh.getRange(2, col);
+      const validation = cell.getDataValidation();
+      const value = cell.getValue();
+      
+      report += `  • ${colName} (col ${col}): `;
+      
+      if (validation) {
+        const criteriaType = validation.getCriteriaType();
+        const criteriaValues = validation.getCriteriaValues();
+        
+        if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          report += `LIST [${criteriaValues[0].join(', ')}]`;
+        } else if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+          report += `RANGE ${criteriaValues[0].getA1Notation()}`;
+        } else {
+          report += criteriaType.toString();
+        }
+        
+        // Проверяем, подходит ли текущее значение
+        if (value && criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          const allowedValues = criteriaValues[0];
+          if (!allowedValues.includes(value)) {
+            report += ` ⚠️ VALUE "${value}" NOT IN LIST!`;
+          }
+        }
+      } else {
+        report += 'NO VALIDATION';
+      }
+      
+      if (value) {
+        report += ` (value: "${value}")`;
+      }
+      report += '\n';
+    });
+    
+    report += '\n';
+  });
+  
+  // Также проверим именованные диапазоны
+  report += '📋 Именованные диапазоны:\n';
+  const namedRanges = ss.getNamedRanges();
+  namedRanges.forEach(nr => {
+    report += `  • ${nr.getName()}: ${nr.getRange().getA1Notation()}\n`;
+  });
+  
+  Logger.log(report);
+  ui.alert('Diagnose Validations', report.substring(0, 4000), ui.ButtonSet.OK);
 }
 
 // ======================================================================
@@ -5112,9 +5214,24 @@ function createBackup_(ss, timestamp) {
  */
 function migrateCollectionsToGoals_(ss) {
   const shC = ss.getSheetByName(SHEET_NAMES.COLLECTIONS);
-  if (!shC) return;
+  if (!shC) {
+    Logger.log('Sheet "Сборы" not found, skipping.');
+    return;
+  }
   
-  const headers = shC.getRange(1, 1, 1, shC.getLastColumn()).getValues()[0];
+  Logger.log('Migrating Collections → Goals...');
+  
+  // ВАЖНО: Сначала очищаем ВСЕ валидации на листе, чтобы избежать конфликтов
+  const lastRow = shC.getLastRow();
+  const lastCol = shC.getLastColumn();
+  if (lastRow > 1 && lastCol > 0) {
+    Logger.log(`Clearing all validations on sheet. Rows: ${lastRow}, Cols: ${lastCol}`);
+    shC.getRange(1, 1, lastRow, lastCol).clearDataValidations();
+  }
+  
+  const headers = shC.getRange(1, 1, 1, lastCol).getValues()[0];
+  Logger.log('Original headers: ' + JSON.stringify(headers));
+  
   const newHeaders = headers.map(h => {
     switch (h) {
       case 'Название сбора': return 'Название цели';
@@ -5132,54 +5249,58 @@ function migrateCollectionsToGoals_(ss) {
     }
   });
   
+  Logger.log('New headers: ' + JSON.stringify(newHeaders));
+  
   // Обновляем заголовки
   shC.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
   
   // Переименовываем ID: C001 → G001
   const idCol = newHeaders.indexOf('goal_id') + 1;
-  if (idCol > 0) {
-    const lastRow = shC.getLastRow();
-    if (lastRow > 1) {
-      const ids = shC.getRange(2, idCol, lastRow - 1, 1).getValues();
-      const newIds = ids.map(r => {
-        const old = String(r[0] || '');
-        return [old.replace(/^C/, 'G')];
-      });
-      shC.getRange(2, idCol, lastRow - 1, 1).setValues(newIds);
-    }
+  if (idCol > 0 && lastRow > 1) {
+    Logger.log(`Updating goal_id in column ${idCol}...`);
+    const ids = shC.getRange(2, idCol, lastRow - 1, 1).getValues();
+    const newIds = ids.map(r => {
+      const old = String(r[0] || '');
+      return [old.replace(/^C/, 'G')];
+    });
+    shC.getRange(2, idCol, lastRow - 1, 1).setValues(newIds);
   }
   
   // Заполняем колонку «Тип» значением «разовая» по умолчанию
   const typeCol = newHeaders.indexOf('Тип') + 1;
-  if (typeCol > 0) {
-    const lastRow = shC.getLastRow();
-    if (lastRow > 1) {
-      const types = [];
-      for (let i = 0; i < lastRow - 1; i++) {
-        types.push([GOAL_TYPES.ONE_TIME]);
-      }
-      shC.getRange(2, typeCol, lastRow - 1, 1).setValues(types);
+  if (typeCol > 0 && lastRow > 1) {
+    Logger.log(`Setting default "Тип" = "${GOAL_TYPES.ONE_TIME}" in column ${typeCol}...`);
+    const types = [];
+    for (let i = 0; i < lastRow - 1; i++) {
+      types.push([GOAL_TYPES.ONE_TIME]);
     }
+    shC.getRange(2, typeCol, lastRow - 1, 1).setValues(types);
   }
   
   // Обновляем режимы начисления (алиасы v1 → v2)
   const modeCol = newHeaders.indexOf('Начисление') + 1;
-  if (modeCol > 0) {
-    const lastRow = shC.getLastRow();
-    if (lastRow > 1) {
-      const modes = shC.getRange(2, modeCol, lastRow - 1, 1).getValues();
-      const newModes = modes.map(r => {
-        const old = String(r[0] || '');
-        return [ACCRUAL_ALIASES[old] || old];
-      });
-      shC.getRange(2, modeCol, lastRow - 1, 1).setValues(newModes);
-    }
+  if (modeCol > 0 && lastRow > 1) {
+    Logger.log(`Updating accrual modes in column ${modeCol}...`);
+    const modes = shC.getRange(2, modeCol, lastRow - 1, 1).getValues();
+    Logger.log('Old modes: ' + JSON.stringify(modes.map(r => r[0])));
+    
+    const newModes = modes.map(r => {
+      const old = String(r[0] || '');
+      const newMode = ACCRUAL_ALIASES[old] || old;
+      if (old !== newMode) {
+        Logger.log(`  Mode: "${old}" → "${newMode}"`);
+      }
+      return [newMode];
+    });
+    
+    Logger.log('New modes: ' + JSON.stringify(newModes.map(r => r[0])));
+    shC.getRange(2, modeCol, lastRow - 1, 1).setValues(newModes);
   }
   
   // Переименовываем лист
   shC.setName(SHEET_NAMES.GOALS);
   
-  Logger.log('Collections migrated to Goals.');
+  Logger.log('Collections migrated to Goals successfully.');
 }
 
 /**

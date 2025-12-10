@@ -95,12 +95,42 @@ function createBackup_(ss, timestamp) {
     const sh = ss.getSheetByName(name);
     if (sh) {
       const copy = sh.copyTo(ss);
-      copy.setName(`${name}_backup_${timestamp}`);
+      const backupName = `${name}_backup_${timestamp}`;
+      copy.setName(backupName);
       copy.hideSheet();
+      
+      // ВАЖНО: Удаляем именованные диапазоны из бэкап-листа, чтобы избежать конфликтов
+      removeNamedRangesFromSheet_(ss, backupName);
     }
   });
   
   Logger.log('Backup created with timestamp: ' + timestamp);
+}
+
+/**
+ * Удаляет все именованные диапазоны, ссылающиеся на указанный лист
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} sheetName
+ */
+function removeNamedRangesFromSheet_(ss, sheetName) {
+  const namedRanges = ss.getNamedRanges();
+  let removed = 0;
+  
+  namedRanges.forEach(nr => {
+    try {
+      const range = nr.getRange();
+      if (range && range.getSheet().getName() === sheetName) {
+        nr.remove();
+        removed++;
+      }
+    } catch (e) {
+      // Диапазон может быть невалидным
+    }
+  });
+  
+  if (removed > 0) {
+    Logger.log(`Removed ${removed} named ranges from sheet "${sheetName}"`);
+  }
 }
 
 /**
@@ -553,4 +583,96 @@ function cleanupBackupsPrompt() {
   
   const deleted = cleanupBackups_(keepCount);
   ui.alert('Готово', `Удалено старых бэкапов: ${deleted}`, ui.ButtonSet.OK);
+}
+
+/**
+ * Очищает именованные диапазоны из всех бэкап-листов
+ * Вызывается для исправления проблем после неудачной миграции
+ */
+function cleanupBackupNamedRanges() {
+  const ss = SpreadsheetApp.getActive();
+  const namedRanges = ss.getNamedRanges();
+  let removed = 0;
+  
+  namedRanges.forEach(nr => {
+    try {
+      const range = nr.getRange();
+      if (range) {
+        const sheetName = range.getSheet().getName();
+        // Удаляем именованные диапазоны из бэкап-листов
+        if (sheetName.includes('_backup_')) {
+          Logger.log(`Removing named range "${nr.getName()}" from backup sheet "${sheetName}"`);
+          nr.remove();
+          removed++;
+        }
+      }
+    } catch (e) {
+      // Диапазон может быть невалидным — пробуем удалить по имени
+      try {
+        const name = nr.getName();
+        if (name.includes('_backup_') || name.includes("'")) {
+          nr.remove();
+          removed++;
+        }
+      } catch (_) {}
+    }
+  });
+  
+  Logger.log(`Cleaned up ${removed} named ranges from backup sheets.`);
+  SpreadsheetApp.getActive().toast(`Очищено именованных диапазонов: ${removed}`, 'Funds');
+  return removed;
+}
+
+/**
+ * Принудительный сброс к v1 и повторная миграция
+ * Использовать если миграция застряла
+ */
+function forceMigrationReset() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    'Принудительный сброс миграции',
+    'Это удалит ВСЕ бэкап-листы и их именованные диапазоны,\n' +
+    'затем пересоздаст структуру с нуля.\n\n' +
+    'Ваши данные на основных листах (Сборы/Цели, Семьи, Платежи) сохранятся.\n\n' +
+    'Продолжить?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) return;
+  
+  const ss = SpreadsheetApp.getActive();
+  
+  // 1. Удаляем все бэкап-листы
+  Logger.log('Removing all backup sheets...');
+  const sheetsToDelete = ss.getSheets().filter(sh => sh.getName().includes('_backup_'));
+  sheetsToDelete.forEach(sh => {
+    try {
+      // Сначала удаляем именованные диапазоны
+      removeNamedRangesFromSheet_(ss, sh.getName());
+      ss.deleteSheet(sh);
+    } catch (e) {
+      Logger.log(`Failed to delete sheet ${sh.getName()}: ${e.message}`);
+    }
+  });
+  
+  // 2. Очищаем оставшиеся проблемные именованные диапазоны
+  cleanupBackupNamedRanges();
+  
+  // 3. Пересоздаём служебные листы
+  Logger.log('Recreating service sheets...');
+  try {
+    setupListsSheet();
+    rebuildValidations();
+  } catch (e) {
+    Logger.log('Error rebuilding: ' + e.message);
+  }
+  
+  ui.alert(
+    'Сброс выполнен',
+    'Бэкап-листы удалены. Теперь можно:\n\n' +
+    '1. Если есть лист "Сборы" — запустить Migrate to v2.0\n' +
+    '2. Если есть лист "Цели" — запустить Setup/Rebuild structure\n',
+    ui.ButtonSet.OK
+  );
 }
