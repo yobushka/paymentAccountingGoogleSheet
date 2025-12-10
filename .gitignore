@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# clasp credentials (contains tokens - never commit!)
+.clasprc.json
+
+# Local clasp config (contains your scriptId)
+.clasp.json
+
+# Backups
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*

@@ -1,0 +1,67 @@
+name: Deploy to Google Apps Script
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'build.cjs'
+  workflow_dispatch:  # Ручной запуск
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm i
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Code.gs
+        run: npm run build
+
+      - name: Setup clasp
+        run: npm install -g @google/clasp
+
+      - name: Create .clasprc.json (auth)
+        run: |
+          echo '${{ secrets.CLASP_CREDENTIALS }}' > ~/.clasprc.json
+
+      - name: Create .clasp.json (project)
+        run: |
+          cat > .clasp.json << EOF
+          {
+            "scriptId": "${{ secrets.SCRIPT_ID }}",
+            "rootDir": "."
+          }
+          EOF
+
+      - name: Create appsscript.json (manifest)
+        run: |
+          cat > appsscript.json << EOF
+          {
+            "timeZone": "Europe/Moscow",
+            "dependencies": {},
+            "exceptionLogging": "STACKDRIVER",
+            "runtimeVersion": "V8"
+          }
+          EOF
+
+      - name: Push to Google Apps Script
+        run: clasp push --force
+
+      - name: Deploy summary
+        run: |
+          echo "✅ Deployed to Google Apps Script"
+          echo "Script ID: ${{ secrets.SCRIPT_ID }}"
