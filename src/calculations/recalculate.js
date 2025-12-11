@@ -10,19 +10,10 @@ function recalculateAll() {
   try {
     refreshBalanceFormulas_();
     
-    // Обновляем тикер детализации
-    const ss = SpreadsheetApp.getActive();
-    const shDetail = ss.getSheetByName(SHEET_NAMES.DETAIL);
-    if (shDetail) {
-      shDetail.getRange('K2').setValue(new Date().toISOString());
-    }
+    // Обновляем детализацию (тикер обновляется внутри refreshDetailSheet_)
     refreshDetailSheet_();
     
-    // Обновляем тикер сводки
-    const shSummary = ss.getSheetByName(SHEET_NAMES.SUMMARY);
-    if (shSummary) {
-      shSummary.getRange('K2').setValue(new Date().toISOString());
-    }
+    // Обновляем сводку (тикер обновляется внутри refreshSummarySheet_)
     refreshSummarySheet_();
     
     // Обновляем статус выдачи

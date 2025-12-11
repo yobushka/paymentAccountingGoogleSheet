@@ -16,27 +16,29 @@ function setupSummarySheet_() {
     sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   }
   
-  // Очищаем возможные остатки в области spill
-  try { sh.getRange('J2:J3').clearContent(); } catch (_) {}
+  // Очищаем старые места тикера/фильтра (K, L) если были
+  try { 
+    sh.getRange('K1:L3').clearContent().clearDataValidations(); 
+    sh.getRange('K1:L3').clearNote();
+  } catch (_) {}
   
-  // Селектор и тикер — за пределами области данных
-  // Очищаем возможную валидацию перед записью меток
-  sh.getRange('L1').clearDataValidations().setValue('Фильтр');
-  sh.getRange('K1').clearDataValidations().setValue('ALL');
+  // Селектор и тикер — в колонках M, N (за пределами данных, которые занимают A-K)
+  sh.getRange('N1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('M1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
     .build();
-  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
-  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели, сначала открытые, ниже — закрытые)');
+  sh.getRange('M1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('M1').setNote('OPEN (только открытые) или ALL (все цели, сначала открытые, ниже — закрытые)');
   
-  sh.getRange('L2').clearDataValidations().setValue('Tick');
-  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('N2').clearDataValidations().setValue('Tick');
+  sh.getRange('M2').clearDataValidations().setValue(new Date().toISOString());
   
   // Array formula
-  sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
+  sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($M$1)=0,"ALL",$M$1), $M$2)`);
   
-  sh.getRange('L3').clearDataValidations().setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
+  sh.getRange('N3').clearDataValidations().setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
   
   SpreadsheetApp.flush();
   try {
@@ -53,11 +55,20 @@ function refreshSummarySheet_() {
   const sh = ss.getSheetByName(SHEET_NAMES.SUMMARY);
   if (!sh) return;
   
+  // Очищаем старые места тикера/фильтра (K, L) если были
+  try { 
+    sh.getRange('K1:L3').clearContent().clearDataValidations(); 
+    sh.getRange('K1:L3').clearNote();
+  } catch (_) {}
+  
   const current = sh.getRange('A2').getFormula();
   if (current.includes('GENERATE_COLLECTION_SUMMARY')) {
-    sh.getRange('K2').setValue(new Date().toISOString());
-    try { sh.getRange('J2:J3').clearContent(); } catch (_) {}
-    sh.getRange('A2').setFormula(current);
+    // Обновляем тикер в новом месте (M2)
+    sh.getRange('M2').setValue(new Date().toISOString());
+    
+    // Обновляем формулу на новые ссылки если нужно
+    const newFormula = `=GENERATE_COLLECTION_SUMMARY(IF(LEN($M$1)=0,"ALL",$M$1), $M$2)`;
+    sh.getRange('A2').setFormula(newFormula);
     
     try {
       SpreadsheetApp.flush();

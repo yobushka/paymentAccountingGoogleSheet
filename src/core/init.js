@@ -70,11 +70,9 @@ function initV2Structure_(ss) {
       sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
     }
     
-    // Заголовки
+    // Заголовки — всегда перезаписываем для соответствия спецификации
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
-    if (headerRange.getValues()[0].join('') === '') {
-      headerRange.setValues([spec.headers]);
-    }
+    headerRange.setValues([spec.headers]);
     
     // Ширины колонок
     spec.colWidths.forEach((w, i) => {
@@ -115,10 +113,9 @@ function initV1Structure_(ss) {
       sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
     }
     
+    // Заголовки — всегда перезаписываем для соответствия спецификации
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
-    if (headerRange.getValues()[0].join('') === '') {
-      headerRange.setValues([spec.headers]);
-    }
+    headerRange.setValues([spec.headers]);
     
     spec.colWidths.forEach((w, i) => {
       if (w) sh.setColumnWidth(i + 1, w);

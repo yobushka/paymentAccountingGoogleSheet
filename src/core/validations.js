@@ -36,12 +36,15 @@ function rebuildValidations() {
   
   Logger.log('Accrual rules for v2: ' + JSON.stringify(lists.accrualRules));
   
-  // Семьи: Активен
+  // Семьи: Активен, Пол
   const shF = ss.getSheetByName(SHEET_NAMES.FAMILIES);
   if (shF) {
     const mapF = getHeaderMap_(shF);
     if (mapF['Активен']) {
       setValidationList_(shF, 2, mapF['Активен'], lists.activeYesNo);
+    }
+    if (mapF['Пол']) {
+      setValidationList_(shF, 2, mapF['Пол'], ['М', 'Ж']);
     }
   }
   

@@ -16,24 +16,29 @@ function setupDetailSheet_() {
     sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   }
   
-  // Селектор фильтра
-  // Очищаем возможную валидацию перед записью меток
-  sh.getRange('J1').clearDataValidations().setValue('Фильтр');
-  sh.getRange('K1').clearDataValidations().setValue('ALL');
+  // Очищаем старые места служебных ячеек (J, K) если были
+  try { 
+    sh.getRange('J1:K3').clearContent().clearDataValidations(); 
+    sh.getRange('J1:K3').clearNote();
+  } catch (_) {}
+  
+  // Селектор фильтра — колонки L, M (данные занимают A-H)
+  sh.getRange('M1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('L1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
     .build();
-  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
-  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели)');
+  sh.getRange('L1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('L1').setNote('OPEN (только открытые) или ALL (все цели)');
   
   // Тикер для принудительного пересчёта
-  sh.getRange('J2').clearDataValidations().setValue('Tick');
-  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
-  sh.getRange('J3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
+  sh.getRange('M2').clearDataValidations().setValue('Tick');
+  sh.getRange('L2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('M3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
   
   // Динамическая формула
-  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
+  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($L$1)=0,"ALL",$L$1), $L$2)`);
 }
 
 /**
@@ -44,17 +49,24 @@ function refreshDetailSheet_() {
   const sh = ss.getSheetByName(SHEET_NAMES.DETAIL);
   if (!sh) return;
   
-  const current = sh.getRange('A2').getFormula();
-  if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
-    // Обновляем тикер для пересчёта
-    sh.getRange('K2').setValue(new Date().toISOString());
-    sh.getRange('A2').setFormula(current);
-    SpreadsheetApp.flush();
-    try {
-      styleSheetHeader_(sh);
-      styleDetailSheet_(sh);
-    } catch (_) {}
-  }
+  // Очищаем старые места служебных ячеек (J, K) если были
+  try { 
+    sh.getRange('J1:K3').clearContent().clearDataValidations(); 
+    sh.getRange('J1:K3').clearNote();
+  } catch (_) {}
+  
+  // Обновляем тикер в новом месте (L2)
+  sh.getRange('L2').setValue(new Date().toISOString());
+  
+  // Обновляем формулу на новые ссылки
+  const newFormula = `=GENERATE_DETAIL_BREAKDOWN(IF(LEN($L$1)=0,"ALL",$L$1), $L$2)`;
+  sh.getRange('A2').setFormula(newFormula);
+  
+  SpreadsheetApp.flush();
+  try {
+    styleSheetHeader_(sh);
+    styleDetailSheet_(sh);
+  } catch (_) {}
 }
 
 /**

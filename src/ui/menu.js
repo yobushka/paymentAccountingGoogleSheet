@@ -43,6 +43,24 @@ function onOpen() {
     menu.addSeparator();
   }
   
+  // Управление структурой и диагностика
+  const structureMenu = ui.createMenu('📋 Structure');
+  structureMenu.addItem('Validate all sheets', 'showStructureReport');
+  structureMenu.addItem('Fix all sheets', 'fixAllSheetsStructure');
+  structureMenu.addItem('Fix current sheet', 'fixSheetStructurePrompt');
+  structureMenu.addSeparator();
+  structureMenu.addItem('Refresh all headers', 'refreshAllHeaders');
+  structureMenu.addItem('Refresh current sheet headers', 'refreshCurrentSheetHeaders');
+  menu.addSubMenu(structureMenu);
+  
+  // Управление стилями
+  const stylesMenu = ui.createMenu('🎨 Styles');
+  stylesMenu.addItem('Fix all sheets styles', 'fixAllSheetsStyles');
+  stylesMenu.addItem('Fix current sheet styles', 'fixCurrentSheetStyles');
+  stylesMenu.addItem('Reset current sheet styles', 'resetCurrentSheetStyles');
+  stylesMenu.addItem('Quick fix all styles', 'quickFixAllStyles');
+  menu.addSubMenu(stylesMenu);
+  
   // Управление бэкапами и диагностика
   const backupMenu = ui.createMenu('🛠 Maintenance');
   backupMenu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');

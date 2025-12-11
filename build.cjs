@@ -46,10 +46,12 @@ const BUILD_ORDER = [
   'src/core/id-generator.js',
   'src/core/close-goal.js',
   'src/core/sample-data.js',
+  'src/core/structure-validator.js',
   
   // 6. UI — меню, стили, диалоги
   'src/ui/menu.js',
   'src/ui/styles.js',
+  'src/ui/styles-fix.js',
   'src/ui/dialogs.js',
   
   // 7. Триггеры — зависят от всего выше

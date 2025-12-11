@@ -1,7 +1,7 @@
 /**
  * @fileoverview Payment Accounting for Google Sheets v2.0
  * 
- * Автоматически сгенерировано из модулей: 2025-12-11T04:46:14.487Z
+ * Автоматически сгенерировано из модулей: 2025-12-11T06:27:59.457Z
  * 
  * НЕ РЕДАКТИРУЙТЕ ЭТОТ ФАЙЛ НАПРЯМУЮ!
  * Вносите изменения в модули в папке src/ и запускайте build.js
@@ -136,14 +136,14 @@ function getSheetsSpec() {
     {
       name: SHEET_NAMES.FAMILIES,
       headers: [
-        'Ребёнок ФИО', 'День рождения',
+        'Ребёнок ФИО', 'Пол', 'День рождения',
         'Мама ФИО', 'Мама телефон', 'Мама реквизиты', 'Мама телеграм',
         'Папа ФИО', 'Папа телефон', 'Папа реквизиты', 'Папа телеграм',
         'Активен', 'Членство с', 'Членство по', 'Комментарий',
         'family_id'
       ],
-      colWidths: [220, 110, 220, 140, 240, 160, 220, 140, 240, 160, 90, 110, 110, 260, 110],
-      dateCols: [2, 12, 13]  // День рождения, Членство с, Членство по
+      colWidths: [220, 60, 110, 220, 140, 240, 160, 220, 140, 240, 160, 90, 110, 110, 260, 110],
+      dateCols: [3, 13, 14]  // День рождения, Членство с, Членство по (сдвинуты на 1)
     },
     {
       // v2.0: Цели вместо Сборы
@@ -1235,19 +1235,10 @@ function recalculateAll() {
   try {
     refreshBalanceFormulas_();
     
-    // Обновляем тикер детализации
-    const ss = SpreadsheetApp.getActive();
-    const shDetail = ss.getSheetByName(SHEET_NAMES.DETAIL);
-    if (shDetail) {
-      shDetail.getRange('K2').setValue(new Date().toISOString());
-    }
+    // Обновляем детализацию (тикер обновляется внутри refreshDetailSheet_)
     refreshDetailSheet_();
     
-    // Обновляем тикер сводки
-    const shSummary = ss.getSheetByName(SHEET_NAMES.SUMMARY);
-    if (shSummary) {
-      shSummary.getRange('K2').setValue(new Date().toISOString());
-    }
+    // Обновляем сводку (тикер обновляется внутри refreshSummarySheet_)
     refreshSummarySheet_();
     
     // Обновляем статус выдачи
@@ -1648,24 +1639,29 @@ function setupDetailSheet_() {
     sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   }
   
-  // Селектор фильтра
-  // Очищаем возможную валидацию перед записью меток
-  sh.getRange('J1').clearDataValidations().setValue('Фильтр');
-  sh.getRange('K1').clearDataValidations().setValue('ALL');
+  // Очищаем старые места служебных ячеек (J, K) если были
+  try { 
+    sh.getRange('J1:K3').clearContent().clearDataValidations(); 
+    sh.getRange('J1:K3').clearNote();
+  } catch (_) {}
+  
+  // Селектор фильтра — колонки L, M (данные занимают A-H)
+  sh.getRange('M1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('L1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
     .build();
-  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
-  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели)');
+  sh.getRange('L1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('L1').setNote('OPEN (только открытые) или ALL (все цели)');
   
   // Тикер для принудительного пересчёта
-  sh.getRange('J2').clearDataValidations().setValue('Tick');
-  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
-  sh.getRange('J3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
+  sh.getRange('M2').clearDataValidations().setValue('Tick');
+  sh.getRange('L2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('M3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
   
   // Динамическая формула
-  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
+  sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($L$1)=0,"ALL",$L$1), $L$2)`);
 }
 
 /**
@@ -1676,17 +1672,24 @@ function refreshDetailSheet_() {
   const sh = ss.getSheetByName(SHEET_NAMES.DETAIL);
   if (!sh) return;
   
-  const current = sh.getRange('A2').getFormula();
-  if (current.includes('GENERATE_DETAIL_BREAKDOWN')) {
-    // Обновляем тикер для пересчёта
-    sh.getRange('K2').setValue(new Date().toISOString());
-    sh.getRange('A2').setFormula(current);
-    SpreadsheetApp.flush();
-    try {
-      styleSheetHeader_(sh);
-      styleDetailSheet_(sh);
-    } catch (_) {}
-  }
+  // Очищаем старые места служебных ячеек (J, K) если были
+  try { 
+    sh.getRange('J1:K3').clearContent().clearDataValidations(); 
+    sh.getRange('J1:K3').clearNote();
+  } catch (_) {}
+  
+  // Обновляем тикер в новом месте (L2)
+  sh.getRange('L2').setValue(new Date().toISOString());
+  
+  // Обновляем формулу на новые ссылки
+  const newFormula = `=GENERATE_DETAIL_BREAKDOWN(IF(LEN($L$1)=0,"ALL",$L$1), $L$2)`;
+  sh.getRange('A2').setFormula(newFormula);
+  
+  SpreadsheetApp.flush();
+  try {
+    styleSheetHeader_(sh);
+    styleDetailSheet_(sh);
+  } catch (_) {}
 }
 
 /**
@@ -2135,27 +2138,29 @@ function setupSummarySheet_() {
     sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   }
   
-  // Очищаем возможные остатки в области spill
-  try { sh.getRange('J2:J3').clearContent(); } catch (_) {}
+  // Очищаем старые места тикера/фильтра (K, L) если были
+  try { 
+    sh.getRange('K1:L3').clearContent().clearDataValidations(); 
+    sh.getRange('K1:L3').clearNote();
+  } catch (_) {}
   
-  // Селектор и тикер — за пределами области данных
-  // Очищаем возможную валидацию перед записью меток
-  sh.getRange('L1').clearDataValidations().setValue('Фильтр');
-  sh.getRange('K1').clearDataValidations().setValue('ALL');
+  // Селектор и тикер — в колонках M, N (за пределами данных, которые занимают A-K)
+  sh.getRange('N1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('M1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
     .build();
-  sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
-  sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели, сначала открытые, ниже — закрытые)');
+  sh.getRange('M1').setDataValidation(rule).setHorizontalAlignment('center');
+  sh.getRange('M1').setNote('OPEN (только открытые) или ALL (все цели, сначала открытые, ниже — закрытые)');
   
-  sh.getRange('L2').clearDataValidations().setValue('Tick');
-  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('N2').clearDataValidations().setValue('Tick');
+  sh.getRange('M2').clearDataValidations().setValue(new Date().toISOString());
   
   // Array formula
-  sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
+  sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($M$1)=0,"ALL",$M$1), $M$2)`);
   
-  sh.getRange('L3').clearDataValidations().setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
+  sh.getRange('N3').clearDataValidations().setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
   
   SpreadsheetApp.flush();
   try {
@@ -2172,11 +2177,20 @@ function refreshSummarySheet_() {
   const sh = ss.getSheetByName(SHEET_NAMES.SUMMARY);
   if (!sh) return;
   
+  // Очищаем старые места тикера/фильтра (K, L) если были
+  try { 
+    sh.getRange('K1:L3').clearContent().clearDataValidations(); 
+    sh.getRange('K1:L3').clearNote();
+  } catch (_) {}
+  
   const current = sh.getRange('A2').getFormula();
   if (current.includes('GENERATE_COLLECTION_SUMMARY')) {
-    sh.getRange('K2').setValue(new Date().toISOString());
-    try { sh.getRange('J2:J3').clearContent(); } catch (_) {}
-    sh.getRange('A2').setFormula(current);
+    // Обновляем тикер в новом месте (M2)
+    sh.getRange('M2').setValue(new Date().toISOString());
+    
+    // Обновляем формулу на новые ссылки если нужно
+    const newFormula = `=GENERATE_COLLECTION_SUMMARY(IF(LEN($M$1)=0,"ALL",$M$1), $M$2)`;
+    sh.getRange('A2').setFormula(newFormula);
     
     try {
       SpreadsheetApp.flush();
@@ -2649,11 +2663,9 @@ function initV2Structure_(ss) {
       sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
     }
     
-    // Заголовки
+    // Заголовки — всегда перезаписываем для соответствия спецификации
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
-    if (headerRange.getValues()[0].join('') === '') {
-      headerRange.setValues([spec.headers]);
-    }
+    headerRange.setValues([spec.headers]);
     
     // Ширины колонок
     spec.colWidths.forEach((w, i) => {
@@ -2694,10 +2706,9 @@ function initV1Structure_(ss) {
       sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
     }
     
+    // Заголовки — всегда перезаписываем для соответствия спецификации
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
-    if (headerRange.getValues()[0].join('') === '') {
-      headerRange.setValues([spec.headers]);
-    }
+    headerRange.setValues([spec.headers]);
     
     spec.colWidths.forEach((w, i) => {
       if (w) sh.setColumnWidth(i + 1, w);
@@ -2810,12 +2821,15 @@ function rebuildValidations() {
   
   Logger.log('Accrual rules for v2: ' + JSON.stringify(lists.accrualRules));
   
-  // Семьи: Активен
+  // Семьи: Активен, Пол
   const shF = ss.getSheetByName(SHEET_NAMES.FAMILIES);
   if (shF) {
     const mapF = getHeaderMap_(shF);
     if (mapF['Активен']) {
       setValidationList_(shF, 2, mapF['Активен'], lists.activeYesNo);
+    }
+    if (mapF['Пол']) {
+      setValidationList_(shF, 2, mapF['Пол'], ['М', 'Ж']);
     }
   }
   
@@ -3728,6 +3742,525 @@ function loadSampleDataV1_() {
 }
 
 // ======================================================================
+// MODULE: src/core/structure-validator.js
+// ======================================================================
+
+/**
+ * Результат валидации листа
+ * @typedef {Object} SheetValidationResult
+ * @property {string} sheetName — название листа
+ * @property {boolean} valid — структура корректна
+ * @property {string[]} missing — отсутствующие колонки
+ * @property {string[]} extra — лишние колонки
+ * @property {string[]} duplicates — дублирующиеся колонки
+ * @property {boolean} orderCorrect — порядок колонок верный
+ * @property {string[]} messages — сообщения о проблемах
+ */
+
+/**
+ * Валидирует структуру всех листов
+ * @returns {SheetValidationResult[]}
+ */
+function validateAllSheets() {
+  const ss = SpreadsheetApp.getActive();
+  const specs = getSheetsSpec();
+  const version = detectVersion();
+  const results = [];
+
+  specs.forEach(spec => {
+    // Пропускаем legacy лист в v2 и наоборот
+    if (version === 'v2' && spec.name === SHEET_NAMES.COLLECTIONS) return;
+    if (version === 'v1' && spec.name === SHEET_NAMES.GOALS) return;
+
+    const result = validateSheet_(ss, spec);
+    results.push(result);
+  });
+
+  return results;
+}
+
+/**
+ * Валидирует структуру одного листа
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {{name: string, headers: string[]}} spec
+ * @returns {SheetValidationResult}
+ */
+function validateSheet_(ss, spec) {
+  const result = {
+    sheetName: spec.name,
+    valid: true,
+    missing: [],
+    extra: [],
+    duplicates: [],
+    orderCorrect: true,
+    messages: []
+  };
+
+  const sh = ss.getSheetByName(spec.name);
+  if (!sh) {
+    result.valid = false;
+    result.messages.push(`Лист «${spec.name}» не найден`);
+    return result;
+  }
+
+  // Получаем текущие заголовки
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) {
+    result.valid = false;
+    result.messages.push(`Лист «${spec.name}» пустой`);
+    return result;
+  }
+
+  const currentHeaders = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const expectedHeaders = spec.headers;
+
+  // Проверяем дубликаты
+  const headerCounts = {};
+  currentHeaders.forEach(h => {
+    if (h) {
+      headerCounts[h] = (headerCounts[h] || 0) + 1;
+    }
+  });
+  Object.entries(headerCounts).forEach(([h, count]) => {
+    if (count > 1) {
+      result.duplicates.push(`${h} (×${count})`);
+      result.valid = false;
+    }
+  });
+
+  // Проверяем отсутствующие колонки
+  const currentSet = new Set(currentHeaders);
+  expectedHeaders.forEach(h => {
+    if (!currentSet.has(h)) {
+      result.missing.push(h);
+      result.valid = false;
+    }
+  });
+
+  // Проверяем лишние колонки (кроме пустых)
+  const expectedSet = new Set(expectedHeaders);
+  currentHeaders.forEach(h => {
+    if (h && !expectedSet.has(h)) {
+      result.extra.push(h);
+      // Лишние колонки — предупреждение, не ошибка
+    }
+  });
+
+  // Проверяем порядок колонок
+  const currentFiltered = currentHeaders.filter(h => expectedSet.has(h));
+  const expectedFiltered = expectedHeaders.filter(h => currentSet.has(h));
+  if (currentFiltered.join('|') !== expectedFiltered.join('|')) {
+    result.orderCorrect = false;
+    result.valid = false;
+  }
+
+  // Формируем сообщения
+  if (result.duplicates.length) {
+    result.messages.push(`Дубликаты: ${result.duplicates.join(', ')}`);
+  }
+  if (result.missing.length) {
+    result.messages.push(`Отсутствуют: ${result.missing.join(', ')}`);
+  }
+  if (result.extra.length) {
+    result.messages.push(`Лишние колонки: ${result.extra.join(', ')}`);
+  }
+  if (!result.orderCorrect) {
+    result.messages.push('Неверный порядок колонок');
+  }
+  if (result.valid && result.extra.length === 0) {
+    result.messages.push('✓ Структура корректна');
+  } else if (result.valid) {
+    result.messages.push('✓ Структура корректна (есть дополнительные колонки)');
+  }
+
+  return result;
+}
+
+/**
+ * Показывает отчёт о валидации структуры
+ * Точка входа из меню
+ */
+function showStructureReport() {
+  const results = validateAllSheets();
+  const ui = SpreadsheetApp.getUi();
+
+  let report = 'ОТЧЁТ О СТРУКТУРЕ ЛИСТОВ\n';
+  report += '═'.repeat(40) + '\n\n';
+
+  let hasErrors = false;
+  results.forEach(r => {
+    const status = r.valid ? '✓' : '✗';
+    report += `${status} ${r.sheetName}\n`;
+    r.messages.forEach(m => {
+      report += `   ${m}\n`;
+    });
+    report += '\n';
+    if (!r.valid) hasErrors = true;
+  });
+
+  if (hasErrors) {
+    report += '─'.repeat(40) + '\n';
+    report += 'Для исправления: Funds → Fix Sheet Structure\n';
+  }
+
+  ui.alert('Валидация структуры', report, ui.ButtonSet.OK);
+}
+
+/**
+ * Исправляет структуру всех листов
+ * Точка входа из меню
+ */
+function fixAllSheetsStructure() {
+  const ui = SpreadsheetApp.getUi();
+  const results = validateAllSheets();
+  
+  const sheetsToFix = results.filter(r => !r.valid || r.extra.length > 0);
+  
+  if (sheetsToFix.length === 0) {
+    ui.alert('Структура в порядке', 'Все листы соответствуют спецификации.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Показываем что будет исправлено
+  let preview = 'Будут исправлены следующие листы:\n\n';
+  sheetsToFix.forEach(r => {
+    preview += `• ${r.sheetName}: ${r.messages.join('; ')}\n`;
+  });
+  preview += '\nПродолжить?';
+
+  const response = ui.alert('Исправление структуры', preview, ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+
+  // Исправляем
+  const ss = SpreadsheetApp.getActive();
+  const specs = getSheetsSpec();
+  let fixed = 0;
+
+  sheetsToFix.forEach(result => {
+    const spec = specs.find(s => s.name === result.sheetName);
+    if (spec) {
+      try {
+        fixSheetStructure_(ss, spec, result);
+        fixed++;
+      } catch (e) {
+        Logger.log(`Error fixing ${result.sheetName}: ${e.message}`);
+      }
+    }
+  });
+
+  // Обновляем валидации после исправления
+  rebuildValidations();
+
+  ui.alert(
+    'Исправление завершено',
+    `Исправлено листов: ${fixed}\n\nВыполните Funds → Recalculate для обновления формул.`,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Исправляет структуру одного листа
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {{name: string, headers: string[], colWidths: number[], dateCols?: number[]}} spec
+ * @param {SheetValidationResult} validation
+ */
+function fixSheetStructure_(ss, spec, validation) {
+  const sh = ss.getSheetByName(spec.name);
+  if (!sh) {
+    // Создаём лист если не существует
+    const newSheet = ss.insertSheet(spec.name);
+    newSheet.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+    spec.colWidths.forEach((w, i) => newSheet.setColumnWidth(i + 1, w));
+    newSheet.setFrozenRows(1);
+    Logger.log(`Created sheet: ${spec.name}`);
+    return;
+  }
+
+  const lastCol = sh.getLastColumn();
+  const lastRow = sh.getLastRow();
+  
+  if (lastCol === 0 || lastRow === 0) {
+    // Пустой лист — просто добавляем заголовки
+    sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+    spec.colWidths.forEach((w, i) => sh.setColumnWidth(i + 1, w));
+    sh.setFrozenRows(1);
+    return;
+  }
+
+  const currentHeaders = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  
+  Logger.log(`Fixing ${spec.name}: current=[${currentHeaders.join(',')}], expected=[${spec.headers.join(',')}]`);
+
+  // Стратегия: создаём карту данных по заголовкам, потом перестраиваем
+  const dataMap = buildDataMap_(sh, currentHeaders, lastRow);
+  
+  // Очищаем лист
+  sh.clear();
+  
+  // Записываем новые заголовки
+  sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+  
+  // Записываем данные в новом порядке
+  if (lastRow > 1) {
+    const newData = rebuildData_(dataMap, spec.headers, lastRow - 1);
+    if (newData.length > 0) {
+      sh.getRange(2, 1, newData.length, spec.headers.length).setValues(newData);
+    }
+  }
+
+  // Устанавливаем ширины колонок
+  spec.colWidths.forEach((w, i) => {
+    if (w) sh.setColumnWidth(i + 1, w);
+  });
+
+  // Форматы дат
+  if (spec.dateCols && lastRow > 1) {
+    spec.dateCols.forEach(col => {
+      sh.getRange(2, col, Math.max(1, lastRow - 1), 1).setNumberFormat('yyyy-mm-dd');
+    });
+  }
+
+  sh.setFrozenRows(1);
+  Logger.log(`Fixed structure for: ${spec.name}`);
+}
+
+/**
+ * Строит карту данных по заголовкам
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {string[]} headers
+ * @param {number} lastRow
+ * @returns {Map<string, any[]>}
+ */
+function buildDataMap_(sh, headers, lastRow) {
+  const map = new Map();
+  
+  if (lastRow <= 1) return map;
+  
+  const data = sh.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  
+  // Обрабатываем дубликаты: берём первую колонку с данными
+  const usedHeaders = new Set();
+  
+  headers.forEach((header, colIndex) => {
+    if (!header) return;
+    
+    // Если заголовок уже использован, пропускаем (дубликат)
+    if (usedHeaders.has(header)) {
+      Logger.log(`Skipping duplicate column: ${header} at index ${colIndex}`);
+      return;
+    }
+    
+    // Проверяем, есть ли данные в этой колонке
+    const columnData = data.map(row => row[colIndex]);
+    const hasData = columnData.some(cell => cell !== '' && cell !== null && cell !== undefined);
+    
+    // Если для этого заголовка ещё нет данных или текущая колонка имеет данные
+    if (!map.has(header) || hasData) {
+      map.set(header, columnData);
+    }
+    
+    usedHeaders.add(header);
+  });
+  
+  return map;
+}
+
+/**
+ * Перестраивает данные согласно новому порядку заголовков
+ * @param {Map<string, any[]>} dataMap
+ * @param {string[]} newHeaders
+ * @param {number} rowCount
+ * @returns {any[][]}
+ */
+function rebuildData_(dataMap, newHeaders, rowCount) {
+  const result = [];
+  
+  for (let i = 0; i < rowCount; i++) {
+    const row = newHeaders.map(header => {
+      const colData = dataMap.get(header);
+      return colData ? (colData[i] ?? '') : '';
+    });
+    
+    // Пропускаем полностью пустые строки
+    if (row.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
+      result.push(row);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Исправляет структуру конкретного листа по имени
+ * @param {string} sheetName
+ */
+function fixSheetByName(sheetName) {
+  const ss = SpreadsheetApp.getActive();
+  const specs = getSheetsSpec();
+  const spec = specs.find(s => s.name === sheetName);
+  
+  if (!spec) {
+    throw new Error(`Спецификация для листа «${sheetName}» не найдена`);
+  }
+  
+  const validation = validateSheet_(ss, spec);
+  fixSheetStructure_(ss, spec, validation);
+  
+  SpreadsheetApp.getActive().toast(`Структура листа «${sheetName}» исправлена.`, 'Funds');
+}
+
+/**
+ * Диалог исправления конкретного листа
+ * Точка входа из меню
+ */
+function fixSheetStructurePrompt() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActive();
+  const activeSheet = ss.getActiveSheet();
+  const sheetName = activeSheet.getName();
+  
+  const specs = getSheetsSpec();
+  const spec = specs.find(s => s.name === sheetName);
+  
+  if (!spec) {
+    ui.alert(
+      'Лист не распознан',
+      `Лист «${sheetName}» не является системным листом.\n\nСистемные листы: ${specs.map(s => s.name).join(', ')}`,
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+  
+  const validation = validateSheet_(ss, spec);
+  
+  if (validation.valid && validation.extra.length === 0) {
+    ui.alert('Структура в порядке', `Лист «${sheetName}» соответствует спецификации.`, ui.ButtonSet.OK);
+    return;
+  }
+  
+  let msg = `Лист «${sheetName}»:\n\n`;
+  validation.messages.forEach(m => msg += `• ${m}\n`);
+  msg += '\nИсправить структуру?';
+  
+  const response = ui.alert('Исправление структуры', msg, ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+  
+  try {
+    fixSheetStructure_(ss, spec, validation);
+    rebuildValidations();
+    ui.alert('Готово', `Структура листа «${sheetName}» исправлена.`, ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Ошибка', e.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Быстрая проверка и исправление текущего листа
+ * Точка входа из меню
+ */
+function quickFixCurrentSheet() {
+  const ss = SpreadsheetApp.getActive();
+  const activeSheet = ss.getActiveSheet();
+  const sheetName = activeSheet.getName();
+  
+  const specs = getSheetsSpec();
+  const spec = specs.find(s => s.name === sheetName);
+  
+  if (!spec) {
+    SpreadsheetApp.getActive().toast(`Лист «${sheetName}» не является системным.`, 'Funds');
+    return;
+  }
+  
+  const validation = validateSheet_(ss, spec);
+  
+  if (validation.valid && validation.extra.length === 0) {
+    SpreadsheetApp.getActive().toast(`Лист «${sheetName}» в порядке.`, 'Funds');
+    return;
+  }
+  
+  fixSheetStructure_(ss, spec, validation);
+  SpreadsheetApp.getActive().toast(`Лист «${sheetName}» исправлен.`, 'Funds');
+}
+
+/**
+ * Обновляет только заголовки всех листов согласно спецификации
+ * Точка входа из меню
+ */
+function refreshAllHeaders() {
+  const ss = SpreadsheetApp.getActive();
+  const specs = getSheetsSpec();
+  const version = detectVersion();
+  let updated = 0;
+  
+  specs.forEach(spec => {
+    // Пропускаем legacy/новый лист в зависимости от версии
+    if (version === 'v2' && spec.name === SHEET_NAMES.COLLECTIONS) return;
+    if (version === 'v1' && spec.name === SHEET_NAMES.GOALS) return;
+    
+    const sh = ss.getSheetByName(spec.name);
+    if (!sh) return;
+    
+    // Расширяем лист если нужно больше столбцов
+    const requiredCols = spec.headers.length;
+    const currentCols = sh.getMaxColumns();
+    if (currentCols < requiredCols) {
+      sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+    }
+    
+    // Перезаписываем заголовки
+    sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+    
+    // Ширины колонок
+    spec.colWidths.forEach((w, i) => {
+      if (w) sh.setColumnWidth(i + 1, w);
+    });
+    
+    updated++;
+  });
+  
+  SpreadsheetApp.getActive().toast(`Обновлено заголовков: ${updated} листов.`, 'Funds');
+}
+
+/**
+ * Обновляет заголовки текущего листа согласно спецификации
+ * Точка входа из меню
+ */
+function refreshCurrentSheetHeaders() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  const sheetName = sh.getName();
+  
+  const specs = getSheetsSpec();
+  const spec = specs.find(s => s.name === sheetName);
+  
+  if (!spec) {
+    SpreadsheetApp.getUi().alert(
+      'Лист не распознан',
+      `Лист «${sheetName}» не является системным листом.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  // Расширяем лист если нужно больше столбцов
+  const requiredCols = spec.headers.length;
+  const currentCols = sh.getMaxColumns();
+  if (currentCols < requiredCols) {
+    sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+  }
+  
+  // Перезаписываем заголовки
+  sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
+  
+  // Ширины колонок
+  spec.colWidths.forEach((w, i) => {
+    if (w) sh.setColumnWidth(i + 1, w);
+  });
+  
+  SpreadsheetApp.getActive().toast(`Заголовки листа «${sheetName}» обновлены.`, 'Funds');
+}
+
+// ======================================================================
 // MODULE: src/ui/menu.js
 // ======================================================================
 
@@ -3771,6 +4304,24 @@ function onOpen() {
     menu.addItem('🔄 Migrate v1 → v2', 'migrateToV2Prompt');
     menu.addSeparator();
   }
+  
+  // Управление структурой и диагностика
+  const structureMenu = ui.createMenu('📋 Structure');
+  structureMenu.addItem('Validate all sheets', 'showStructureReport');
+  structureMenu.addItem('Fix all sheets', 'fixAllSheetsStructure');
+  structureMenu.addItem('Fix current sheet', 'fixSheetStructurePrompt');
+  structureMenu.addSeparator();
+  structureMenu.addItem('Refresh all headers', 'refreshAllHeaders');
+  structureMenu.addItem('Refresh current sheet headers', 'refreshCurrentSheetHeaders');
+  menu.addSubMenu(structureMenu);
+  
+  // Управление стилями
+  const stylesMenu = ui.createMenu('🎨 Styles');
+  stylesMenu.addItem('Fix all sheets styles', 'fixAllSheetsStyles');
+  stylesMenu.addItem('Fix current sheet styles', 'fixCurrentSheetStyles');
+  stylesMenu.addItem('Reset current sheet styles', 'resetCurrentSheetStyles');
+  stylesMenu.addItem('Quick fix all styles', 'quickFixAllStyles');
+  menu.addSubMenu(stylesMenu);
   
   // Управление бэкапами и диагностика
   const backupMenu = ui.createMenu('🛠 Maintenance');
@@ -4458,6 +5009,677 @@ function setHeaderNotes_(sh, notes) {
       sh.getRange(1, col).setNote(note);
     }
   });
+}
+
+// ======================================================================
+// MODULE: src/ui/styles-fix.js
+// ======================================================================
+
+// ============================================================================
+// Цветовая схема
+// ============================================================================
+
+const STYLE_COLORS = {
+  // Заголовки
+  HEADER_BG: '#4a86e8',
+  HEADER_TEXT: '#ffffff',
+  
+  // Зебра-полосы
+  ZEBRA_EVEN: '#ffffff',
+  ZEBRA_ODD: '#f8f9fa',
+  
+  // Статусы
+  STATUS_OPEN: '#c8e6c9',      // зелёный
+  STATUS_CLOSED: '#e0e0e0',    // серый
+  STATUS_CANCELLED: '#ffcdd2', // красный
+  STATUS_YES: '#c8e6c9',       // зелёный
+  STATUS_NO: '#ffcdd2',        // красный
+  
+  // Баланс
+  POSITIVE: '#c8e6c9',         // зелёный (переплата)
+  NEGATIVE: '#ffcdd2',         // красный (долг)
+  NEUTRAL: '#fff9c4',          // жёлтый (ноль)
+  
+  // Неактивные строки
+  INACTIVE_BG: '#f5f5f5',
+  INACTIVE_TEXT: '#9e9e9e',
+  
+  // Границы
+  BORDER: '#dadce0'
+};
+
+// ============================================================================
+// Главные функции починки стилей
+// ============================================================================
+
+/**
+ * Полная починка стилей всех листов
+ * Точка входа из меню
+ */
+function fixAllSheetsStyles() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    'Починка стилей',
+    'Будут восстановлены:\n\n' +
+    '• Форматирование заголовков\n' +
+    '• Чередующиеся строки (zebra)\n' +
+    '• Условное форматирование\n' +
+    '• Числовые форматы\n' +
+    '• Ширины колонок\n' +
+    '• Фильтры и закреплённые строки\n' +
+    '• Примечания к заголовкам\n\n' +
+    'Продолжить?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) return;
+  
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const specs = getSheetsSpec();
+    const version = detectVersion();
+    let fixed = 0;
+    
+    specs.forEach(spec => {
+      // Пропускаем legacy/новый лист в зависимости от версии
+      if (version === 'v2' && spec.name === SHEET_NAMES.COLLECTIONS) return;
+      if (version === 'v1' && spec.name === SHEET_NAMES.GOALS) return;
+      
+      const sh = ss.getSheetByName(spec.name);
+      if (sh) {
+        fixSheetStyles_(sh, spec);
+        fixed++;
+      }
+    });
+    
+    // Добавляем примечания
+    addHeaderNotes_();
+    
+    ui.alert(
+      'Стили восстановлены',
+      `Обработано листов: ${fixed}`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    ui.alert('Ошибка', e.message, ui.ButtonSet.OK);
+    Logger.log('fixAllSheetsStyles error: ' + e.message);
+  }
+}
+
+/**
+ * Починка стилей текущего листа
+ * Точка входа из меню
+ */
+function fixCurrentSheetStyles() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  const sheetName = sh.getName();
+  
+  const specs = getSheetsSpec();
+  const spec = specs.find(s => s.name === sheetName);
+  
+  if (!spec) {
+    SpreadsheetApp.getUi().alert(
+      'Лист не распознан',
+      `Лист «${sheetName}» не является системным листом.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  fixSheetStyles_(sh, spec);
+  SpreadsheetApp.getActive().toast(`Стили листа «${sheetName}» восстановлены.`, 'Funds');
+}
+
+/**
+ * Полная починка стилей одного листа
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {{name: string, headers: string[], colWidths: number[], dateCols?: number[]}} spec
+ */
+function fixSheetStyles_(sh, spec) {
+  const sheetName = spec.name;
+  Logger.log(`Fixing styles for: ${sheetName}`);
+  
+  // 1. Очищаем все существующие стили
+  clearAllStyles_(sh);
+  
+  // 2. Базовые стили (заголовок, zebra, ширины)
+  applyBaseStyles_(sh, spec);
+  
+  // 3. Специфичные стили для листа
+  applySheetSpecificStyles_(sh, sheetName);
+  
+  // 4. Фильтры
+  applyAutoFilter_(sh);
+  
+  Logger.log(`Styles fixed for: ${sheetName}`);
+}
+
+// ============================================================================
+// Очистка стилей
+// ============================================================================
+
+/**
+ * Очищает все стили листа
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ */
+function clearAllStyles_(sh) {
+  const lastRow = Math.max(sh.getLastRow(), 1);
+  const lastCol = Math.max(sh.getLastColumn(), 1);
+  
+  // Удаляем условное форматирование
+  sh.setConditionalFormatRules([]);
+  
+  // Удаляем banding (чередующиеся строки)
+  const bandings = sh.getBandings();
+  bandings.forEach(b => b.remove());
+  
+  // Удаляем фильтры
+  const filter = sh.getFilter();
+  if (filter) filter.remove();
+  
+  // Сбрасываем форматирование данных
+  const dataRange = sh.getRange(1, 1, lastRow, lastCol);
+  dataRange
+    .setBackground(null)
+    .setFontColor('#000000')
+    .setFontWeight('normal')
+    .setFontStyle('normal')
+    .setHorizontalAlignment('left')
+    .setBorder(false, false, false, false, false, false);
+  
+  // Удаляем примечания с заголовков
+  if (lastCol > 0) {
+    sh.getRange(1, 1, 1, lastCol).clearNote();
+  }
+}
+
+// ============================================================================
+// Базовые стили
+// ============================================================================
+
+/**
+ * Применяет базовые стили к листу
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {{name: string, headers: string[], colWidths: number[], dateCols?: number[]}} spec
+ */
+function applyBaseStyles_(sh, spec) {
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  
+  if (lastCol < 1) return;
+  
+  // 1. Стили заголовка
+  const headerRange = sh.getRange(1, 1, 1, lastCol);
+  headerRange
+    .setFontWeight('bold')
+    .setBackground(STYLE_COLORS.HEADER_BG)
+    .setFontColor(STYLE_COLORS.HEADER_TEXT)
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle')
+    .setWrap(true);
+  
+  // Закрепляем первую строку
+  sh.setFrozenRows(1);
+  
+  // 2. Ширины колонок
+  spec.colWidths.forEach((w, i) => {
+    if (w && i < lastCol) {
+      sh.setColumnWidth(i + 1, w);
+    }
+  });
+  
+  // 3. Чередующиеся строки (zebra)
+  if (lastRow > 1) {
+    applyZebraStripesEnhanced_(sh, 2, lastRow, lastCol);
+  }
+  
+  // 4. Форматы дат
+  if (spec.dateCols && lastRow > 1) {
+    spec.dateCols.forEach(col => {
+      if (col <= lastCol) {
+        sh.getRange(2, col, lastRow - 1, 1).setNumberFormat('yyyy-mm-dd');
+      }
+    });
+  }
+  
+  // 5. Границы данных
+  if (lastRow > 0) {
+    const allRange = sh.getRange(1, 1, lastRow, lastCol);
+    allRange.setBorder(true, true, true, true, true, true, STYLE_COLORS.BORDER, SpreadsheetApp.BorderStyle.SOLID);
+  }
+}
+
+/**
+ * Применяет улучшенные чередующиеся строки
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {number} startRow
+ * @param {number} endRow
+ * @param {number} lastCol
+ */
+function applyZebraStripesEnhanced_(sh, startRow, endRow, lastCol) {
+  if (endRow < startRow || lastCol < 1) return;
+  
+  const dataRange = sh.getRange(startRow, 1, endRow - startRow + 1, lastCol);
+  
+  try {
+    // Удаляем старые bandings
+    const bandings = sh.getBandings();
+    bandings.forEach(b => b.remove());
+    
+    // Применяем banding
+    dataRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false);
+  } catch (e) {
+    // Fallback: ручное чередование
+    for (let row = startRow; row <= endRow; row++) {
+      const color = (row - startRow) % 2 === 0 ? STYLE_COLORS.ZEBRA_EVEN : STYLE_COLORS.ZEBRA_ODD;
+      sh.getRange(row, 1, 1, lastCol).setBackground(color);
+    }
+  }
+}
+
+// ============================================================================
+// Специфичные стили для листов
+// ============================================================================
+
+/**
+ * Применяет специфичные стили в зависимости от типа листа
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {string} sheetName
+ */
+function applySheetSpecificStyles_(sh, sheetName) {
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return;
+  
+  switch (sheetName) {
+    case SHEET_NAMES.FAMILIES:
+      applyFamiliesStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.GOALS:
+      applyGoalsStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.COLLECTIONS:
+      applyCollectionsStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.PAYMENTS:
+      applyPaymentsStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.PARTICIPATION:
+      applyParticipationStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.BALANCE:
+      applyBalanceStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.DETAIL:
+      applyDetailStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.SUMMARY:
+      applySummaryStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.ISSUES:
+      applyIssuesStyles_(sh, lastRow);
+      break;
+    case SHEET_NAMES.ISSUE_STATUS:
+      applyIssueStatusStyles_(sh, lastRow);
+      break;
+  }
+}
+
+/**
+ * Стили для листа «Семьи»
+ */
+function applyFamiliesStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  // Формат дат
+  ['День рождения', 'Членство с', 'Членство по'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('yyyy-mm-dd');
+    }
+  });
+  
+  // Условное форматирование: неактивные — серый фон
+  const activeCol = map['Активен'];
+  if (activeCol) {
+    const lastCol = sh.getLastColumn();
+    const rowRange = sh.getRange(2, 1, lastRow - 1, lastCol);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=$${colToLetter_(activeCol)}2="${ACTIVE_STATUS.NO}"`)
+      .setBackground(STYLE_COLORS.INACTIVE_BG)
+      .setFontColor(STYLE_COLORS.INACTIVE_TEXT)
+      .setRanges([rowRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Цели»
+ */
+function applyGoalsStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  // Числовые форматы
+  ['Параметр суммы', 'Фиксированный x', 'Возмещено'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  // Условное форматирование: Статус
+  const statusCol = map['Статус'];
+  if (statusCol) {
+    const statusRange = sh.getRange(2, statusCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(GOAL_STATUS.OPEN)
+      .setBackground(STYLE_COLORS.STATUS_OPEN)
+      .setRanges([statusRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(GOAL_STATUS.CLOSED)
+      .setBackground(STYLE_COLORS.STATUS_CLOSED)
+      .setRanges([statusRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(GOAL_STATUS.CANCELLED)
+      .setBackground(STYLE_COLORS.STATUS_CANCELLED)
+      .setRanges([statusRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Сборы» (legacy v1.x)
+ */
+function applyCollectionsStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  ['Параметр суммы', 'Фиксированный x', 'Возмещено'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  const statusCol = map['Статус'];
+  if (statusCol) {
+    const statusRange = sh.getRange(2, statusCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(COLLECTION_STATUS_V1.OPEN)
+      .setBackground(STYLE_COLORS.STATUS_OPEN)
+      .setRanges([statusRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(COLLECTION_STATUS_V1.CLOSED)
+      .setBackground(STYLE_COLORS.STATUS_CLOSED)
+      .setRanges([statusRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Платежи»
+ */
+function applyPaymentsStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  
+  // Формат суммы
+  if (map['Сумма']) {
+    sh.getRange(2, map['Сумма'], lastRow - 1, 1).setNumberFormat('#,##0.00');
+  }
+  
+  // Выравнивание
+  if (map['payment_id']) {
+    sh.getRange(2, map['payment_id'], lastRow - 1, 1).setHorizontalAlignment('center');
+  }
+}
+
+/**
+ * Стили для листа «Участие»
+ */
+function applyParticipationStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  const statusCol = map['Статус'];
+  if (statusCol) {
+    const statusRange = sh.getRange(2, statusCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(PARTICIPATION_STATUS.PARTICIPATES)
+      .setBackground(STYLE_COLORS.STATUS_YES)
+      .setRanges([statusRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(PARTICIPATION_STATUS.NOT_PARTICIPATES)
+      .setBackground(STYLE_COLORS.STATUS_NO)
+      .setRanges([statusRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Баланс»
+ */
+function applyBalanceStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  // Числовые форматы
+  ['Внесено всего', 'Списано всего', 'Зарезервировано', 'Свободный остаток', 'Задолженность'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  // Условное форматирование: Задолженность > 0
+  const debtCol = map['Задолженность'];
+  if (debtCol) {
+    const debtRange = sh.getRange(2, debtCol, lastRow - 1, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(0)
+      .setBackground(STYLE_COLORS.NEGATIVE)
+      .setRanges([debtRange])
+      .build());
+  }
+  
+  // Условное форматирование: Свободный остаток < 0
+  const freeCol = map['Свободный остаток'];
+  if (freeCol) {
+    const freeRange = sh.getRange(2, freeCol, lastRow - 1, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(0)
+      .setBackground(STYLE_COLORS.NEGATIVE)
+      .setRanges([freeRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(0)
+      .setBackground(STYLE_COLORS.POSITIVE)
+      .setRanges([freeRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Детализация»
+ */
+function applyDetailStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  ['Оплачено', 'Начислено', 'Разность (±)'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  // Условное форматирование: Разность
+  const diffCol = map['Разность (±)'];
+  if (diffCol) {
+    const diffRange = sh.getRange(2, diffCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(0)
+      .setBackground(STYLE_COLORS.POSITIVE)
+      .setRanges([diffRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(0)
+      .setBackground(STYLE_COLORS.NEGATIVE)
+      .setRanges([diffRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Сводка»
+ */
+function applySummaryStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  
+  ['Сумма цели', 'Собрано', 'Остаток до цели', 'Переплата'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+}
+
+/**
+ * Стили для листа «Выдача»
+ */
+function applyIssuesStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  // Условное форматирование: Выдано
+  const issuedCol = map['Выдано'];
+  if (issuedCol) {
+    const issuedRange = sh.getRange(2, issuedCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(ACTIVE_STATUS.YES)
+      .setBackground(STYLE_COLORS.STATUS_YES)
+      .setRanges([issuedRange])
+      .build());
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(ACTIVE_STATUS.NO)
+      .setBackground(STYLE_COLORS.STATUS_NO)
+      .setRanges([issuedRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+/**
+ * Стили для листа «Статус выдачи»
+ */
+function applyIssueStatusStyles_(sh, lastRow) {
+  const map = getHeaderMap_(sh);
+  const rules = [];
+  
+  if (map['x (цена)']) {
+    sh.getRange(2, map['x (цена)'], lastRow - 1, 1).setNumberFormat('#,##0.00');
+  }
+  
+  // Условное форматирование: Остаток > 0
+  const remainCol = map['Остаток (шт)'];
+  if (remainCol) {
+    const remainRange = sh.getRange(2, remainCol, lastRow - 1, 1);
+    
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(0)
+      .setBackground(STYLE_COLORS.NEUTRAL)
+      .setRanges([remainRange])
+      .build());
+  }
+  
+  sh.setConditionalFormatRules(rules);
+}
+
+// ============================================================================
+// Вспомогательные функции
+// ============================================================================
+
+/**
+ * Применяет автофильтр к листу
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ */
+function applyAutoFilter_(sh) {
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  
+  if (lastRow < 1 || lastCol < 1) return;
+  
+  // Удаляем существующий фильтр
+  const existingFilter = sh.getFilter();
+  if (existingFilter) existingFilter.remove();
+  
+  // Создаём новый
+  try {
+    sh.getRange(1, 1, lastRow, lastCol).createFilter();
+  } catch (e) {
+    // Фильтр уже существует или ошибка
+    Logger.log(`Filter error for ${sh.getName()}: ${e.message}`);
+  }
+}
+
+/**
+ * Быстрая починка стилей всех листов (без диалога)
+ */
+function quickFixAllStyles() {
+  const ss = SpreadsheetApp.getActive();
+  const specs = getSheetsSpec();
+  const version = detectVersion();
+  
+  specs.forEach(spec => {
+    if (version === 'v2' && spec.name === SHEET_NAMES.COLLECTIONS) return;
+    if (version === 'v1' && spec.name === SHEET_NAMES.GOALS) return;
+    
+    const sh = ss.getSheetByName(spec.name);
+    if (sh) {
+      fixSheetStyles_(sh, spec);
+    }
+  });
+  
+  addHeaderNotes_();
+  SpreadsheetApp.getActive().toast('Стили всех листов обновлены.', 'Funds');
+}
+
+/**
+ * Сбрасывает все стили листа к базовым
+ * Точка входа из меню
+ */
+function resetCurrentSheetStyles() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  
+  clearAllStyles_(sh);
+  SpreadsheetApp.getActive().toast(`Стили листа «${sh.getName()}» сброшены.`, 'Funds');
 }
 
 // ======================================================================
