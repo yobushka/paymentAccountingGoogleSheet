@@ -17,8 +17,9 @@ function setupDetailSheet_() {
   }
   
   // Селектор фильтра
-  sh.getRange('J1').setValue('Фильтр');
-  sh.getRange('K1').setValue('ALL');
+  // Очищаем возможную валидацию перед записью меток
+  sh.getRange('J1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('K1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
@@ -27,9 +28,9 @@ function setupDetailSheet_() {
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели)');
   
   // Тикер для принудительного пересчёта
-  sh.getRange('J2').setValue('Tick');
-  sh.getRange('K2').setValue(new Date().toISOString());
-  sh.getRange('J3').setValue('Детализация платежей и начислений. Автообновляется.');
+  sh.getRange('J2').clearDataValidations().setValue('Tick');
+  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('J3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
   
   // Динамическая формула
   sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
@@ -476,8 +477,8 @@ function calculateAccrual_(fid, goal, participants, goalPayments, x, kPayers) {
       return (participants.has(fid) && unitX > 0) ? (Math.floor(paid / unitX) * unitX) : 0;
       
     case ACCRUAL_MODES.VOLUNTARY:
-      // Добровольный взнос: начисление = платёж
-      return participants.has(fid) ? paid : 0;
+      // Добровольный взнос: начисление = 0, деньги остаются на балансе
+      return 0;
       
     default:
       return 0;

@@ -361,7 +361,7 @@ function styleSummarySheet_(sh) {
   
   const map = getHeaderMap_(sh);
   
-  ['Сумма цели', 'Собрано', 'Остаток до цели'].forEach(h => {
+  ['Сумма цели', 'Собрано', 'Остаток до цели', 'Переплата'].forEach(h => {
     if (map[h]) {
       sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
     }

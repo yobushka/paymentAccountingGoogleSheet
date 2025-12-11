@@ -127,7 +127,8 @@ export function calculateAccrual(fid, goal, participants, goalPayments, x, kPaye
       return (participants.has(fid) && unitX > 0) ? (Math.floor(paid / unitX) * unitX) : 0;
 
     case ACCRUAL_MODES.VOLUNTARY:
-      return participants.has(fid) ? paid : 0;
+      // Добровольный взнос: начисление = 0, деньги остаются на балансе
+      return 0;
 
     default:
       return 0;

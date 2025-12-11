@@ -31,8 +31,9 @@ function setupBalanceExamples() {
   }
   
   // Селектор фильтра: OPEN | ALL
-  sh.getRange('I1').setValue('Фильтр начисления');
-  sh.getRange('J1').setValue('ALL');
+  // Очищаем возможную валидацию перед записью меток
+  sh.getRange('I1').clearDataValidations().setValue('Фильтр начисления');
+  sh.getRange('J1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
@@ -43,7 +44,7 @@ function setupBalanceExamples() {
   // Обновляем формулы для баланса
   refreshBalanceFormulas_();
   
-  sh.getRange('I3').setValue('Примечание: даты платежей используются только для справки. Расчёты мгновенные.');
+  sh.getRange('I3').clearDataValidations().setValue('Примечание: даты платежей используются только для справки. Расчёты мгновенные.');
   
   // Настраиваем связанные листы
   setupDetailSheet_();

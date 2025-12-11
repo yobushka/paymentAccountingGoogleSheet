@@ -1,7 +1,7 @@
 /**
  * @fileoverview Payment Accounting for Google Sheets v2.0
  * 
- * Автоматически сгенерировано из модулей: 2025-12-10T22:58:41.693Z
+ * Автоматически сгенерировано из модулей: 2025-12-11T04:46:14.487Z
  * 
  * НЕ РЕДАКТИРУЙТЕ ЭТОТ ФАЙЛ НАПРЯМУЮ!
  * Вносите изменения в модули в папке src/ и запускайте build.js
@@ -1532,8 +1532,9 @@ function setupBalanceExamples() {
   }
   
   // Селектор фильтра: OPEN | ALL
-  sh.getRange('I1').setValue('Фильтр начисления');
-  sh.getRange('J1').setValue('ALL');
+  // Очищаем возможную валидацию перед записью меток
+  sh.getRange('I1').clearDataValidations().setValue('Фильтр начисления');
+  sh.getRange('J1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
@@ -1544,7 +1545,7 @@ function setupBalanceExamples() {
   // Обновляем формулы для баланса
   refreshBalanceFormulas_();
   
-  sh.getRange('I3').setValue('Примечание: даты платежей используются только для справки. Расчёты мгновенные.');
+  sh.getRange('I3').clearDataValidations().setValue('Примечание: даты платежей используются только для справки. Расчёты мгновенные.');
   
   // Настраиваем связанные листы
   setupDetailSheet_();
@@ -1648,8 +1649,9 @@ function setupDetailSheet_() {
   }
   
   // Селектор фильтра
-  sh.getRange('J1').setValue('Фильтр');
-  sh.getRange('K1').setValue('ALL');
+  // Очищаем возможную валидацию перед записью меток
+  sh.getRange('J1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('K1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
@@ -1658,9 +1660,9 @@ function setupDetailSheet_() {
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели)');
   
   // Тикер для принудительного пересчёта
-  sh.getRange('J2').setValue('Tick');
-  sh.getRange('K2').setValue(new Date().toISOString());
-  sh.getRange('J3').setValue('Детализация платежей и начислений. Автообновляется.');
+  sh.getRange('J2').clearDataValidations().setValue('Tick');
+  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
+  sh.getRange('J3').clearDataValidations().setValue('Детализация платежей и начислений. Автообновляется.');
   
   // Динамическая формула
   sh.getRange('A2').setFormula(`=GENERATE_DETAIL_BREAKDOWN(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
@@ -2107,8 +2109,8 @@ function calculateAccrual_(fid, goal, participants, goalPayments, x, kPayers) {
       return (participants.has(fid) && unitX > 0) ? (Math.floor(paid / unitX) * unitX) : 0;
       
     case ACCRUAL_MODES.VOLUNTARY:
-      // Добровольный взнос: начисление = платёж
-      return participants.has(fid) ? paid : 0;
+      // Добровольный взнос: начисление = 0, деньги остаются на балансе
+      return 0;
       
     default:
       return 0;
@@ -2137,8 +2139,9 @@ function setupSummarySheet_() {
   try { sh.getRange('J2:J3').clearContent(); } catch (_) {}
   
   // Селектор и тикер — за пределами области данных
-  sh.getRange('L1').setValue('Фильтр');
-  sh.getRange('K1').setValue('ALL');
+  // Очищаем возможную валидацию перед записью меток
+  sh.getRange('L1').clearDataValidations().setValue('Фильтр');
+  sh.getRange('K1').clearDataValidations().setValue('ALL');
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OPEN', 'ALL'], true)
     .setAllowInvalid(false)
@@ -2146,13 +2149,13 @@ function setupSummarySheet_() {
   sh.getRange('K1').setDataValidation(rule).setHorizontalAlignment('center');
   sh.getRange('K1').setNote('OPEN (только открытые) или ALL (все цели, сначала открытые, ниже — закрытые)');
   
-  sh.getRange('L2').setValue('Tick');
-  sh.getRange('K2').setValue(new Date().toISOString());
+  sh.getRange('L2').clearDataValidations().setValue('Tick');
+  sh.getRange('K2').clearDataValidations().setValue(new Date().toISOString());
   
   // Array formula
   sh.getRange('A2').setFormula(`=GENERATE_COLLECTION_SUMMARY(IF(LEN($K$1)=0,"ALL",$K$1), $K$2)`);
   
-  sh.getRange('L3').setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
+  sh.getRange('L3').clearDataValidations().setValue('Сводка по целям. ALL: сверху открытые, внизу закрытые.');
   
   SpreadsheetApp.flush();
   try {
@@ -2420,6 +2423,12 @@ function refreshIssueStatusSheet_() {
     sh = ss.insertSheet(SHEET_NAMES.ISSUE_STATUS);
     if (spec) {
       sh.setFrozenRows(1);
+      // Расширяем лист если нужно больше столбцов
+      const requiredCols = spec.headers.length;
+      const currentCols = sh.getMaxColumns();
+      if (currentCols < requiredCols) {
+        sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+      }
       sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
       spec.colWidths?.forEach((w, i) => { if (w) sh.setColumnWidth(i + 1, w); });
     }
@@ -2633,6 +2642,13 @@ function initV2Structure_(ss) {
     
     const sh = getOrCreateSheet(ss, spec.name);
     
+    // Расширяем лист если нужно больше столбцов
+    const requiredCols = spec.headers.length;
+    const currentCols = sh.getMaxColumns();
+    if (currentCols < requiredCols) {
+      sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+    }
+    
     // Заголовки
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
     if (headerRange.getValues()[0].join('') === '') {
@@ -2670,6 +2686,13 @@ function initV1Structure_(ss) {
     if (spec.name === SHEET_NAMES.GOALS) return;
     
     const sh = getOrCreateSheet(ss, spec.name);
+    
+    // Расширяем лист если нужно больше столбцов
+    const requiredCols = spec.headers.length;
+    const currentCols = sh.getMaxColumns();
+    if (currentCols < requiredCols) {
+      sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+    }
     
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
     if (headerRange.getValues()[0].join('') === '') {
@@ -3749,8 +3772,12 @@ function onOpen() {
     menu.addSeparator();
   }
   
-  // Управление бэкапами
-  menu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');
+  // Управление бэкапами и диагностика
+  const backupMenu = ui.createMenu('🛠 Maintenance');
+  backupMenu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');
+  backupMenu.addItem('Cleanup backup named ranges', 'cleanupBackupNamedRanges');
+  backupMenu.addItem('⚠️ Force migration reset', 'forceMigrationReset');
+  menu.addSubMenu(backupMenu);
   
   // Информация
   menu.addItem('About', 'showAbout_');
@@ -4283,7 +4310,7 @@ function styleSummarySheet_(sh) {
   
   const map = getHeaderMap_(sh);
   
-  ['Сумма цели', 'Собрано', 'Остаток до цели'].forEach(h => {
+  ['Сумма цели', 'Собрано', 'Остаток до цели', 'Переплата'].forEach(h => {
     if (map[h]) {
       sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
     }
@@ -5200,12 +5227,42 @@ function createBackup_(ss, timestamp) {
     const sh = ss.getSheetByName(name);
     if (sh) {
       const copy = sh.copyTo(ss);
-      copy.setName(`${name}_backup_${timestamp}`);
+      const backupName = `${name}_backup_${timestamp}`;
+      copy.setName(backupName);
       copy.hideSheet();
+      
+      // ВАЖНО: Удаляем именованные диапазоны из бэкап-листа, чтобы избежать конфликтов
+      removeNamedRangesFromSheet_(ss, backupName);
     }
   });
   
   Logger.log('Backup created with timestamp: ' + timestamp);
+}
+
+/**
+ * Удаляет все именованные диапазоны, ссылающиеся на указанный лист
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} sheetName
+ */
+function removeNamedRangesFromSheet_(ss, sheetName) {
+  const namedRanges = ss.getNamedRanges();
+  let removed = 0;
+  
+  namedRanges.forEach(nr => {
+    try {
+      const range = nr.getRange();
+      if (range && range.getSheet().getName() === sheetName) {
+        nr.remove();
+        removed++;
+      }
+    } catch (e) {
+      // Диапазон может быть невалидным
+    }
+  });
+  
+  if (removed > 0) {
+    Logger.log(`Removed ${removed} named ranges from sheet "${sheetName}"`);
+  }
 }
 
 /**
@@ -5658,4 +5715,96 @@ function cleanupBackupsPrompt() {
   
   const deleted = cleanupBackups_(keepCount);
   ui.alert('Готово', `Удалено старых бэкапов: ${deleted}`, ui.ButtonSet.OK);
+}
+
+/**
+ * Очищает именованные диапазоны из всех бэкап-листов
+ * Вызывается для исправления проблем после неудачной миграции
+ */
+function cleanupBackupNamedRanges() {
+  const ss = SpreadsheetApp.getActive();
+  const namedRanges = ss.getNamedRanges();
+  let removed = 0;
+  
+  namedRanges.forEach(nr => {
+    try {
+      const range = nr.getRange();
+      if (range) {
+        const sheetName = range.getSheet().getName();
+        // Удаляем именованные диапазоны из бэкап-листов
+        if (sheetName.includes('_backup_')) {
+          Logger.log(`Removing named range "${nr.getName()}" from backup sheet "${sheetName}"`);
+          nr.remove();
+          removed++;
+        }
+      }
+    } catch (e) {
+      // Диапазон может быть невалидным — пробуем удалить по имени
+      try {
+        const name = nr.getName();
+        if (name.includes('_backup_') || name.includes("'")) {
+          nr.remove();
+          removed++;
+        }
+      } catch (_) {}
+    }
+  });
+  
+  Logger.log(`Cleaned up ${removed} named ranges from backup sheets.`);
+  SpreadsheetApp.getActive().toast(`Очищено именованных диапазонов: ${removed}`, 'Funds');
+  return removed;
+}
+
+/**
+ * Принудительный сброс к v1 и повторная миграция
+ * Использовать если миграция застряла
+ */
+function forceMigrationReset() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.alert(
+    'Принудительный сброс миграции',
+    'Это удалит ВСЕ бэкап-листы и их именованные диапазоны,\n' +
+    'затем пересоздаст структуру с нуля.\n\n' +
+    'Ваши данные на основных листах (Сборы/Цели, Семьи, Платежи) сохранятся.\n\n' +
+    'Продолжить?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response !== ui.Button.YES) return;
+  
+  const ss = SpreadsheetApp.getActive();
+  
+  // 1. Удаляем все бэкап-листы
+  Logger.log('Removing all backup sheets...');
+  const sheetsToDelete = ss.getSheets().filter(sh => sh.getName().includes('_backup_'));
+  sheetsToDelete.forEach(sh => {
+    try {
+      // Сначала удаляем именованные диапазоны
+      removeNamedRangesFromSheet_(ss, sh.getName());
+      ss.deleteSheet(sh);
+    } catch (e) {
+      Logger.log(`Failed to delete sheet ${sh.getName()}: ${e.message}`);
+    }
+  });
+  
+  // 2. Очищаем оставшиеся проблемные именованные диапазоны
+  cleanupBackupNamedRanges();
+  
+  // 3. Пересоздаём служебные листы
+  Logger.log('Recreating service sheets...');
+  try {
+    setupListsSheet();
+    rebuildValidations();
+  } catch (e) {
+    Logger.log('Error rebuilding: ' + e.message);
+  }
+  
+  ui.alert(
+    'Сброс выполнен',
+    'Бэкап-листы удалены. Теперь можно:\n\n' +
+    '1. Если есть лист "Сборы" — запустить Migrate to v2.0\n' +
+    '2. Если есть лист "Цели" — запустить Setup/Rebuild structure\n',
+    ui.ButtonSet.OK
+  );
 }

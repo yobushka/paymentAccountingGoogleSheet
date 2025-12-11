@@ -39,6 +39,12 @@ function refreshIssueStatusSheet_() {
     sh = ss.insertSheet(SHEET_NAMES.ISSUE_STATUS);
     if (spec) {
       sh.setFrozenRows(1);
+      // Расширяем лист если нужно больше столбцов
+      const requiredCols = spec.headers.length;
+      const currentCols = sh.getMaxColumns();
+      if (currentCols < requiredCols) {
+        sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+      }
       sh.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
       spec.colWidths?.forEach((w, i) => { if (w) sh.setColumnWidth(i + 1, w); });
     }

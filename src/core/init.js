@@ -63,6 +63,13 @@ function initV2Structure_(ss) {
     
     const sh = getOrCreateSheet(ss, spec.name);
     
+    // Расширяем лист если нужно больше столбцов
+    const requiredCols = spec.headers.length;
+    const currentCols = sh.getMaxColumns();
+    if (currentCols < requiredCols) {
+      sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+    }
+    
     // Заголовки
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
     if (headerRange.getValues()[0].join('') === '') {
@@ -100,6 +107,13 @@ function initV1Structure_(ss) {
     if (spec.name === SHEET_NAMES.GOALS) return;
     
     const sh = getOrCreateSheet(ss, spec.name);
+    
+    // Расширяем лист если нужно больше столбцов
+    const requiredCols = spec.headers.length;
+    const currentCols = sh.getMaxColumns();
+    if (currentCols < requiredCols) {
+      sh.insertColumnsAfter(currentCols, requiredCols - currentCols);
+    }
     
     const headerRange = sh.getRange(1, 1, 1, spec.headers.length);
     if (headerRange.getValues()[0].join('') === '') {

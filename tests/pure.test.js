@@ -300,13 +300,14 @@ describe('calculateAccrual', () => {
   });
 
   describe('voluntary', () => {
-    it('returns full payment for participant', () => {
+    it('returns 0 for participant (money stays on balance)', () => {
       const goal = makeGoal(ACCRUAL_MODES.VOLUNTARY, 0);
       const participants = new Set(['F001', 'F002']);
       const payments = new Map([['F001', 1234], ['F002', 5678]]);
       
-      expect(calculateAccrual('F001', goal, participants, payments, 0, 0)).toBe(1234);
-      expect(calculateAccrual('F002', goal, participants, payments, 0, 0)).toBe(5678);
+      // voluntary: начисление = 0, деньги остаются на балансе
+      expect(calculateAccrual('F001', goal, participants, payments, 0, 0)).toBe(0);
+      expect(calculateAccrual('F002', goal, participants, payments, 0, 0)).toBe(0);
     });
     
     it('returns 0 for non-participant', () => {
