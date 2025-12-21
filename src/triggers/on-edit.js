@@ -12,12 +12,16 @@ function onEdit(e) {
   const sh = e.range.getSheet();
   const sheetName = sh.getName();
   const row = e.range.getRow();
+  const col = e.range.getColumn();
   
   // Авто-генерация ID при начале ввода данных
   handleAutoIdGeneration_(sh, sheetName, row);
   
   // Авто-обновление балансов при изменении релевантных листов
   handleAutoRefresh_(sheetName);
+  
+  // Зависимая валидация Статья → Подстатья на листе Цели
+  handleDependentSubarticleValidation_(sh, sheetName, row, col, e.value);
 }
 
 /**
@@ -120,4 +124,81 @@ function maybeAutoIdRow_(sh, row, idHeader, prefix, width, triggerHeaders) {
   // Генерируем ID
   const ss = SpreadsheetApp.getActive();
   fillMissingIds_(ss, sh.getName(), idCol, prefix, width);
+}
+
+/**
+ * Обработка зависимой валидации Статья → Подстатья
+ * При изменении Статьи обновляет список допустимых Подстатей
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {string} sheetName
+ * @param {number} row
+ * @param {number} col
+ * @param {*} newValue
+ */
+function handleDependentSubarticleValidation_(sh, sheetName, row, col, newValue) {
+  // Работаем только с листом Цели
+  if (sheetName !== SHEET_NAMES.GOALS) return;
+  if (row < 2) return;
+  
+  const map = getHeaderMap_(sh);
+  const articleCol = map['Статья'];
+  const subarticleCol = map['Подстатья'];
+  
+  // Проверяем, что редактировали колонку Статья
+  if (!articleCol || col !== articleCol) return;
+  if (!subarticleCol) return;
+  
+  const selectedArticle = String(newValue || '').trim();
+  const subarticleCell = sh.getRange(row, subarticleCol);
+  
+  // Если Статья очищена — показываем все подстатьи из Lists
+  if (!selectedArticle) {
+    const ss = SpreadsheetApp.getActive();
+    const sourceRange = ss.getRange('Lists!I2:I');
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(sourceRange, true)
+      .setAllowInvalid(true)
+      .build();
+    subarticleCell.setDataValidation(rule);
+    subarticleCell.setValue(''); // Сбрасываем подстатью
+    return;
+  }
+  
+  // Получаем подстатьи для выбранной статьи из листа Смета
+  const ss = SpreadsheetApp.getActive();
+  const shBudget = ss.getSheetByName(SHEET_NAMES.BUDGET);
+  if (!shBudget) return;
+  
+  const budgetData = shBudget.getDataRange().getValues();
+  const budgetMap = getHeaderMap_(shBudget);
+  const budgetArticleCol = budgetMap['Статья'] || 1;
+  const budgetSubarticleCol = budgetMap['Подстатья'] || 2;
+  
+  // Собираем уникальные подстатьи для выбранной статьи
+  const subarticles = [];
+  for (let i = 1; i < budgetData.length; i++) {
+    const art = String(budgetData[i][budgetArticleCol - 1] || '').trim();
+    const subart = String(budgetData[i][budgetSubarticleCol - 1] || '').trim();
+    if (art === selectedArticle && subart && !subarticles.includes(subart)) {
+      subarticles.push(subart);
+    }
+  }
+  
+  // Устанавливаем валидацию
+  if (subarticles.length > 0) {
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(subarticles, true)
+      .setAllowInvalid(true)
+      .build();
+    subarticleCell.setDataValidation(rule);
+  } else {
+    // Нет подстатей для этой статьи — убираем валидацию
+    subarticleCell.clearDataValidations();
+  }
+  
+  // Проверяем, валидна ли текущая подстатья
+  const currentSubarticle = String(subarticleCell.getValue() || '').trim();
+  if (currentSubarticle && !subarticles.includes(currentSubarticle)) {
+    subarticleCell.setValue(''); // Сбрасываем невалидную подстатью
+  }
 }

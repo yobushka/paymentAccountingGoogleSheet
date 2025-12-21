@@ -271,15 +271,67 @@ function fixSheetStructure_(ss, spec, validation) {
     if (w) sh.setColumnWidth(i + 1, w);
   });
 
-  // Форматы дат
-  if (spec.dateCols && lastRow > 1) {
-    spec.dateCols.forEach(col => {
-      sh.getRange(2, col, Math.max(1, lastRow - 1), 1).setNumberFormat('yyyy-mm-dd');
-    });
-  }
+  // Применяем форматы по именам заголовков (надёжнее, чем по номерам)
+  applySheetFormats_(sh, spec, lastRow);
 
   sh.setFrozenRows(1);
   Logger.log(`Fixed structure for: ${spec.name}`);
+}
+
+/**
+ * Применяет форматы ячеек по именам заголовков
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {{name: string, headers: string[]}} spec
+ * @param {number} lastRow
+ */
+function applySheetFormats_(sh, spec, lastRow) {
+  if (lastRow < 2) return;
+  
+  const map = getHeaderMap_(sh);
+  const rows = lastRow - 1;
+  
+  // Определяем форматы по именам колонок
+  const dateColumns = [
+    'День рождения', 'Членство с', 'Членство по',
+    'Дата начала', 'Дедлайн', 'Дата чека',
+    'Дата', 'Дата выдачи'
+  ];
+  
+  const numberColumns = [
+    'Параметр суммы', 'Фиксированный x', 'К выдаче детям', 'Возмещено',
+    'Сумма', 'Единиц',
+    'Внесено всего', 'Списано всего', 'Зарезервировано', 'Свободный остаток', 'Задолженность',
+    'Оплачено', 'Начислено', 'Разность (±)',
+    'Сумма цели', 'Собрано', 'Остаток до цели', 'Переплата',
+    'x (цена)', 'Единиц требуется', 'Единиц оплачено', 'Единиц выдано', 'Остаток (шт)',
+    'Значение', 'Итого'
+  ];
+  
+  const textColumns = [
+    'Статья', 'Подстатья', 'Начисление', 'Статус', 'Тип', 'Периодичность',
+    'Способ', 'Комментарий', 'Кто выдал'
+  ];
+  
+  // Применяем форматы дат
+  dateColumns.forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], rows, 1).setNumberFormat('yyyy-mm-dd');
+    }
+  });
+  
+  // Применяем числовые форматы
+  numberColumns.forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], rows, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  // Применяем текстовые форматы (сброс ошибочных форматов)
+  textColumns.forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], rows, 1).setNumberFormat('@');
+    }
+  });
 }
 
 /**

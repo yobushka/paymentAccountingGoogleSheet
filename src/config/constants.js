@@ -14,7 +14,8 @@ const ACCRUAL_MODES = {
   DYNAMIC_BY_PAYERS: 'dynamic_by_payers',
   PROPORTIONAL_BY_PAYERS: 'proportional_by_payers',
   UNIT_PRICE: 'unit_price',
-  VOLUNTARY: 'voluntary'
+  VOLUNTARY: 'voluntary',
+  FROM_BALANCE: 'from_balance'
 };
 
 // Алиасы для обратной совместимости v1.x
@@ -83,6 +84,7 @@ const SHEET_NAMES = {
   BALANCE: 'Баланс',
   DETAIL: 'Детализация',
   SUMMARY: 'Сводка',
+  BUDGET: 'Смета',
   ISSUES: 'Выдача',
   ISSUE_STATUS: 'Статус выдачи',
   LISTS: 'Lists'
@@ -94,6 +96,8 @@ const NAMED_RANGES = {
   ACTIVE_FAMILIES_LABELS: 'ACTIVE_FAMILIES_LABELS',
   GOALS_LABELS: 'GOALS_LABELS',
   OPEN_GOALS_LABELS: 'OPEN_GOALS_LABELS',
+  BUDGET_ARTICLES: 'BUDGET_ARTICLES',
+  BUDGET_SUBARTICLES: 'BUDGET_SUBARTICLES',
   // v1.x legacy
   COLLECTIONS_LABELS: 'COLLECTIONS_LABELS',
   OPEN_COLLECTIONS_LABELS: 'OPEN_COLLECTIONS_LABELS'

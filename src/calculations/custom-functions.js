@@ -210,6 +210,57 @@ function DEBUG_BALANCE_ACCRUAL(familyId) {
   return result;
 }
 
+/**
+ * Отладочная функция: проверка участников цели
+ * @param {string} goalId
+ * @returns {string}
+ * @customfunction
+ */
+function DEBUG_PARTICIPANTS(goalId) {
+  const ss = SpreadsheetApp.getActive();
+  const version = detectVersion();
+  
+  const shF = ss.getSheetByName(SHEET_NAMES.FAMILIES);
+  const shG = version === 'v1' 
+    ? ss.getSheetByName(SHEET_NAMES.COLLECTIONS) 
+    : ss.getSheetByName(SHEET_NAMES.GOALS);
+  const shU = ss.getSheetByName(SHEET_NAMES.PARTICIPATION);
+  
+  if (!shF || !shG) return 'Sheets not found';
+  
+  // Читаем заголовки семей
+  const famHeaders = shF.getRange(1, 1, 1, shF.getLastColumn()).getValues()[0];
+  
+  const families = readFamilies_(shF);
+  const goals = readGoals_(shG, version, 'ALL');
+  const participation = readParticipation_(shU, version);
+  
+  const goal = goals.get(goalId);
+  if (!goal) return 'Goal not found: ' + goalId;
+  
+  const participants = resolveParticipants_(goalId, families, participation, goal);
+  
+  let result = `Goal: ${goalId}\n`;
+  result += `Family headers: [${famHeaders.join(', ')}]\n`;
+  result += `Total families read: ${families.size}\n`;
+  
+  // Показываем первые 5 семей для отладки
+  let count = 0;
+  families.forEach((fam, fid) => {
+    if (count < 5) {
+      result += `  ${fid}: active=${fam.active}, memberFrom=${fam.memberFrom}, memberTo=${fam.memberTo}\n`;
+      count++;
+    }
+  });
+  
+  result += `Participants count: ${participants.size}\n`;
+  if (participants.size > 0 && participants.size <= 10) {
+    result += `Participants: [${Array.from(participants).join(', ')}]\n`;
+  }
+  
+  return result;
+}
+
 // ============================================================================
 // v2.0 Балансовые кастомные функции
 // ============================================================================
@@ -575,3 +626,250 @@ function MEMBERSHIP_RATIO(familyLabelOrId, year) {
   const months = MEMBERSHIP_MONTHS(familyLabelOrId, year);
   return round2_(months / 12);
 }
+
+/**
+ * Диагностика чтения целей — проверяет заголовки и данные листа Цели
+ * @returns {string}
+ * @customfunction
+ */
+function DEBUG_GOALS_READING() {
+  const ss = SpreadsheetApp.getActive();
+  const version = detectVersion();
+  
+  const shG = version === 'v1' 
+    ? ss.getSheetByName(SHEET_NAMES.COLLECTIONS) 
+    : ss.getSheetByName(SHEET_NAMES.GOALS);
+  
+  if (!shG) return `Sheet not found: ${version === 'v1' ? SHEET_NAMES.COLLECTIONS : SHEET_NAMES.GOALS}`;
+  
+  let result = `Version: ${version}\n`;
+  result += `Sheet: ${shG.getName()}\n`;
+  result += `Last row: ${shG.getLastRow()}, Last col: ${shG.getLastColumn()}\n\n`;
+  
+  // Читаем заголовки
+  const headers = shG.getRange(1, 1, 1, shG.getLastColumn()).getValues()[0];
+  result += `=== HEADERS (${headers.length}) ===\n`;
+  headers.forEach((h, i) => {
+    result += `  [${i}] "${h}"\n`;
+  });
+  
+  // Ожидаемые заголовки по sheets-spec
+  const expectedV2 = ['goal_id', 'Название цели', 'Статья', 'Подстатья', 'Тип', 'Статус', 
+    'Дата начала', 'Дедлайн', 'Начисление', 'Параметр суммы', 'Параметр шаг/ед', 
+    'Зафиксировано x', 'Подтверждено', 'Автовыбывание', 'Комментарий', 'Дата чека'];
+  
+  result += `\n=== EXPECTED HEADERS ===\n`;
+  expectedV2.forEach((h, i) => {
+    const found = headers.indexOf(h);
+    const status = found >= 0 ? `found at [${found}]` : 'MISSING!';
+    result += `  "${h}" — ${status}\n`;
+  });
+  
+  // Важные заголовки для расчётов
+  const map = getHeaderMap_(shG);
+  result += `\n=== HEADER MAP (key columns) ===\n`;
+  ['goal_id', 'Название цели', 'Статус', 'Начисление', 'Параметр суммы'].forEach(h => {
+    result += `  "${h}" → col ${map[h] || 'undefined'}\n`;
+  });
+  
+  // Читаем первые 3 строки данных
+  const rows = shG.getLastRow();
+  if (rows >= 2) {
+    result += `\n=== DATA SAMPLE (first 3 goals) ===\n`;
+    const data = shG.getRange(2, 1, Math.min(rows - 1, 3), shG.getLastColumn()).getValues();
+    data.forEach((row, ri) => {
+      result += `Row ${ri + 2}:\n`;
+      result += `  goal_id: "${row[map['goal_id'] - 1] || ''}"\n`;
+      result += `  Название: "${row[map['Название цели'] - 1] || ''}"\n`;
+      result += `  Статус: "${row[map['Статус'] - 1] || ''}"\n`;
+      result += `  Начисление: "${row[map['Начисление'] - 1] || ''}"\n`;
+      result += `  Параметр суммы: "${row[map['Параметр суммы'] - 1] || ''}"\n`;
+    });
+  }
+  
+  // Пробуем readGoals_ и смотрим результат
+  result += `\n=== readGoals_ TEST ===\n`;
+  try {
+    const goals = readGoals_(shG, version, 'ALL');
+    result += `Goals count: ${goals.size}\n`;
+    let count = 0;
+    goals.forEach((g, gid) => {
+      if (count < 3) {
+        result += `  ${gid}: mode=${g.mode}, T=${g.T}, status=${g.status}\n`;
+        count++;
+      }
+    });
+  } catch (e) {
+    result += `ERROR: ${e.message}\n`;
+  }
+  
+  return result;
+}
+
+/**
+ * Диагностика типов данных в колонках листа Цели
+ * @returns {string}
+ * @customfunction
+ */
+function DEBUG_GOALS_DATA_TYPES() {
+  const ss = SpreadsheetApp.getActive();
+  const shG = ss.getSheetByName(SHEET_NAMES.GOALS);
+  
+  if (!shG) return 'Sheet "Цели" not found';
+  
+  const lastRow = shG.getLastRow();
+  const lastCol = shG.getLastColumn();
+  
+  if (lastRow < 2) return 'No data rows in "Цели"';
+  
+  const headers = shG.getRange(1, 1, 1, lastCol).getValues()[0];
+  const map = {};
+  headers.forEach((h, i) => { if (h) map[h] = i + 1; });
+  
+  let result = `=== GOALS DATA TYPES ===\n`;
+  result += `Rows: ${lastRow - 1}, Cols: ${lastCol}\n\n`;
+  
+  // Колонки для проверки типов
+  const checkCols = ['goal_id', 'Название цели', 'Статья', 'Подстатья', 'Статус', 'Начисление', 'Параметр суммы'];
+  
+  result += `=== COLUMN POSITIONS ===\n`;
+  checkCols.forEach(h => {
+    const col = map[h];
+    result += `  "${h}": col ${col || 'NOT FOUND'}\n`;
+  });
+  
+  // Проверяем данные первых 5 строк
+  const dataRange = shG.getRange(2, 1, Math.min(5, lastRow - 1), lastCol);
+  const data = dataRange.getValues();
+  
+  result += `\n=== DATA SAMPLE (first 5 rows) ===\n`;
+  data.forEach((row, ri) => {
+    result += `\nRow ${ri + 2}:\n`;
+    checkCols.forEach(h => {
+      const col = map[h];
+      if (col) {
+        const val = row[col - 1];
+        const type = typeof val;
+        const valStr = val === null ? 'null' : 
+                       val === undefined ? 'undefined' : 
+                       val === '' ? '(empty)' : 
+                       String(val).substring(0, 30);
+        result += `  ${h}: [${type}] "${valStr}"\n`;
+      }
+    });
+  });
+  
+  // Проверяем форматы ячеек
+  result += `\n=== NUMBER FORMATS (row 2) ===\n`;
+  if (lastRow >= 2) {
+    checkCols.forEach(h => {
+      const col = map[h];
+      if (col) {
+        try {
+          const format = shG.getRange(2, col).getNumberFormat();
+          result += `  ${h}: "${format}"\n`;
+        } catch (e) {
+          result += `  ${h}: error - ${e.message}\n`;
+        }
+      }
+    });
+  }
+  
+  // Проверяем валидации
+  result += `\n=== DATA VALIDATIONS (row 2) ===\n`;
+  if (lastRow >= 2) {
+    checkCols.forEach(h => {
+      const col = map[h];
+      if (col) {
+        try {
+          const validation = shG.getRange(2, col).getDataValidation();
+          if (validation) {
+            const criteria = validation.getCriteriaType();
+            result += `  ${h}: ${criteria}\n`;
+          } else {
+            result += `  ${h}: no validation\n`;
+          }
+        } catch (e) {
+          result += `  ${h}: error - ${e.message}\n`;
+        }
+      }
+    });
+  }
+  
+  return result;
+}
+
+/**
+ * Диагностика листа Lists — проверяет формулы и содержимое
+ * @returns {string}
+ * @customfunction
+ */
+function DEBUG_LISTS_SHEET() {
+  const ss = SpreadsheetApp.getActive();
+  const shLists = ss.getSheetByName(SHEET_NAMES.LISTS);
+  
+  if (!shLists) return 'Sheet "Lists" not found';
+  
+  let result = `=== LISTS SHEET DIAGNOSTIC ===\n`;
+  result += `Last row: ${shLists.getLastRow()}, Last col: ${shLists.getLastColumn()}\n\n`;
+  
+  // Читаем заголовки
+  const headers = shLists.getRange(1, 1, 1, 10).getValues()[0];
+  result += `=== HEADERS ===\n`;
+  headers.forEach((h, i) => {
+    result += `  [${String.fromCharCode(65 + i)}] "${h}"\n`;
+  });
+  
+  // Проверяем формулы
+  result += `\n=== FORMULAS ===\n`;
+  const checkCols = [1, 2, 3, 4, 7, 9]; // A, B, C, D, G, I
+  checkCols.forEach(col => {
+    const colLetter = String.fromCharCode(64 + col);
+    const cell = shLists.getRange(2, col);
+    const formula = cell.getFormula();
+    const value = cell.getValue();
+    
+    result += `  ${colLetter}2: `;
+    if (formula) {
+      result += `FORMULA: ${formula.substring(0, 80)}...\n`;
+    } else if (value) {
+      result += `VALUE: "${value}"\n`;
+    } else {
+      result += `EMPTY\n`;
+    }
+  });
+  
+  // Проверяем содержимое колонок G и I (статьи и подстатьи)
+  result += `\n=== COLUMN G (BUDGET_ARTICLES) ===\n`;
+  const colG = shLists.getRange('G2:G').getValues();
+  const articlesCount = colG.filter(r => r[0] !== '').length;
+  result += `Count: ${articlesCount}\n`;
+  if (articlesCount > 0) {
+    result += `Values: ${colG.slice(0, 10).filter(r => r[0]).map(r => r[0]).join(', ')}\n`;
+  }
+  
+  result += `\n=== COLUMN I (BUDGET_SUBARTICLES) ===\n`;
+  const colI = shLists.getRange('I2:I').getValues();
+  const subarticlesCount = colI.filter(r => r[0] !== '').length;
+  result += `Count: ${subarticlesCount}\n`;
+  if (subarticlesCount > 0) {
+    result += `Values: ${colI.slice(0, 10).filter(r => r[0]).map(r => r[0]).join(', ')}\n`;
+  }
+  
+  // Проверяем лист Смета
+  result += `\n=== BUDGET SHEET CHECK ===\n`;
+  const shBudget = ss.getSheetByName(SHEET_NAMES.BUDGET);
+  if (shBudget) {
+    const budgetData = shBudget.getRange('A2:B').getValues();
+    const articlesRaw = budgetData.map(r => r[0]).filter(v => v !== '');
+    const subarticlesRaw = budgetData.map(r => r[1]).filter(v => v !== '');
+    result += `Budget rows: ${budgetData.length}\n`;
+    result += `Articles (raw): ${articlesRaw.length} — ${articlesRaw.slice(0, 5).join(', ')}\n`;
+    result += `Subarticles (raw): ${subarticlesRaw.length} — ${subarticlesRaw.slice(0, 5).join(', ')}\n`;
+  } else {
+    result += `Sheet "Смета" NOT FOUND!\n`;
+  }
+  
+  return result;
+}
+

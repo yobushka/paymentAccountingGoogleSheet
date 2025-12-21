@@ -30,16 +30,17 @@ function getSheetsSpec() {
       // v2.0: Цели вместо Сборы
       name: SHEET_NAMES.GOALS,
       headers: [
-        'Название цели', 'Тип', 'Статус',
+        'Название цели', 'Статья', 'Подстатья',
+        'Тип', 'Статус',
         'Дата начала', 'Дедлайн',
         'Начисление', 'Параметр суммы', 'Фиксированный x', 'К выдаче детям',
         'Периодичность', 'Родительская цель',
-        'Закупка из средств', 'Возмещено',
+        'Закупка из средств', 'Возмещено', 'Дата чека',
         'Комментарий',
         'goal_id', 'Ссылка на гуглдиск'
       ],
-      colWidths: [260, 120, 120, 110, 110, 220, 150, 140, 150, 140, 140, 200, 110, 260, 120, 300],
-      dateCols: [4, 5]
+      colWidths: [260, 150, 180, 120, 120, 110, 110, 220, 150, 140, 150, 140, 140, 200, 110, 110, 260, 120, 300],
+      dateCols: [6, 7, 16]
     },
     {
       // v1.x legacy: Сборы (для миграции)
@@ -110,14 +111,18 @@ function getSheetsSpec() {
       colWidths: [120, 260, 180, 140, 140, 120, 150, 150, 220, 150, 130]
     },
     {
+      name: SHEET_NAMES.BUDGET,
+      headers: [
+        'Статья', 'Подстатья', 'Описание', 'Параметр', 'Значение', 'Ед.изм.', 'Расчёт', 'Итого'
+      ],
+      colWidths: [200, 200, 300, 200, 120, 80, 200, 140]
+    },
+    {
       name: SHEET_NAMES.LISTS, // скрытый служебный лист
       headers: [
-        'OPEN_GOALS', '',
-        'GOALS', '',
-        'ACTIVE_FAMILIES', '',
-        'FAMILIES', ''
+        'OPEN_GOALS', 'GOALS', 'ACTIVE_FAMILIES', 'FAMILIES', '', '', 'BUDGET_ARTICLES', '', 'BUDGET_SUBARTICLES'
       ],
-      colWidths: [260, 40, 260, 40, 260, 40, 260, 40]
+      colWidths: [260, 260, 260, 260, 40, 40, 200, 40, 200]
     }
   ];
 }
@@ -213,12 +218,9 @@ function getSheetsSpecV1() {
     {
       name: 'Lists',
       headers: [
-        'OPEN_COLLECTIONS', '',
-        'COLLECTIONS', '',
-        'ACTIVE_FAMILIES', '',
-        'FAMILIES', ''
+        'OPEN_COLLECTIONS', 'COLLECTIONS', 'ACTIVE_FAMILIES', 'FAMILIES'
       ],
-      colWidths: [260, 40, 260, 40, 260, 40, 260, 40]
+      colWidths: [260, 260, 260, 260]
     }
   ];
 }

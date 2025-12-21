@@ -9,67 +9,69 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   const menu = ui.createMenu('Funds');
   
-  // Основные операции
-  menu.addItem('Setup / Rebuild structure', 'init');
-  menu.addItem('Generate IDs (all sheets)', 'generateAllIds');
-  menu.addItem('Rebuild data validations', 'rebuildValidations');
-  menu.addItem('Recalculate (Balance & Detail)', 'recalculateAll');
+  // ===== ОСНОВНЫЕ ОПЕРАЦИИ =====
+  menu.addItem('⚙️ Настройка структуры', 'init');
+  menu.addItem('🔄 Пересчитать баланс', 'recalculateAll');
+  menu.addItem('🔒 Закрыть цель', 'closeGoalPrompt');
   
   menu.addSeparator();
   
-  // Операции со сборами/целями
-  menu.addItem('Close Goal', 'closeGoalPrompt');
+  // ===== СПРАВКА =====
+  menu.addItem('❓ Справка', 'showQuickHelp_');
+  menu.addItem('💰 Проверить баланс семьи', 'showQuickBalanceCheck_');
   
   menu.addSeparator();
   
-  // Демо и очистка
-  menu.addItem('Load Sample Data (separate)', 'loadSampleDataPrompt');
-  menu.addItem('Cleanup visuals (trim sheets)', 'cleanupWorkbook_');
-  menu.addItem('Audit & fix field types', 'auditAndFixFieldTypes');
+  // ===== ПОДМЕНЮ: ДАННЫЕ =====
+  const dataMenu = ui.createMenu('📊 Данные');
+  dataMenu.addItem('Сгенерировать ID', 'generateAllIds');
+  dataMenu.addItem('Обновить выпадающие списки', 'rebuildValidations');
+  dataMenu.addItem('Исправить типы полей', 'auditAndFixFieldTypes');
+  dataMenu.addSeparator();
+  dataMenu.addItem('Загрузить демо-данные', 'loadSampleDataPrompt');
+  menu.addSubMenu(dataMenu);
   
-  menu.addSeparator();
-  
-  // Быстрые проверки
-  menu.addItem('Quick Help', 'showQuickHelp_');
-  menu.addItem('Quick Balance Check', 'showQuickBalanceCheck_');
-  menu.addItem('Migration Report', 'showMigrationReport_');
-  menu.addItem('🔍 Diagnose Validations', 'diagnoseValidations_');
-  
-  menu.addSeparator();
-  
-  // Миграция (если нужна)
-  if (needsMigration()) {
-    menu.addItem('🔄 Migrate v1 → v2', 'migrateToV2Prompt');
-    menu.addSeparator();
-  }
-  
-  // Управление структурой и диагностика
-  const structureMenu = ui.createMenu('📋 Structure');
-  structureMenu.addItem('Validate all sheets', 'showStructureReport');
-  structureMenu.addItem('Fix all sheets', 'fixAllSheetsStructure');
-  structureMenu.addItem('Fix current sheet', 'fixSheetStructurePrompt');
+  // ===== ПОДМЕНЮ: СТРУКТУРА =====
+  const structureMenu = ui.createMenu('📋 Структура');
+  structureMenu.addItem('Проверить структуру листов', 'showStructureReport');
+  structureMenu.addItem('Исправить все листы', 'fixAllSheetsStructure');
+  structureMenu.addItem('Исправить текущий лист', 'fixSheetStructurePrompt');
   structureMenu.addSeparator();
-  structureMenu.addItem('Refresh all headers', 'refreshAllHeaders');
-  structureMenu.addItem('Refresh current sheet headers', 'refreshCurrentSheetHeaders');
+  structureMenu.addItem('Обновить заголовки (все)', 'refreshAllHeaders');
+  structureMenu.addItem('Обновить заголовки (текущий)', 'refreshCurrentSheetHeaders');
   menu.addSubMenu(structureMenu);
   
-  // Управление стилями
-  const stylesMenu = ui.createMenu('🎨 Styles');
-  stylesMenu.addItem('Fix all sheets styles', 'fixAllSheetsStyles');
-  stylesMenu.addItem('Fix current sheet styles', 'fixCurrentSheetStyles');
-  stylesMenu.addItem('Reset current sheet styles', 'resetCurrentSheetStyles');
-  stylesMenu.addItem('Quick fix all styles', 'quickFixAllStyles');
+  // ===== ПОДМЕНЮ: ОФОРМЛЕНИЕ =====
+  const stylesMenu = ui.createMenu('🎨 Оформление');
+  stylesMenu.addItem('Применить стили (все листы)', 'fixAllSheetsStyles');
+  stylesMenu.addItem('Применить стили (текущий)', 'fixCurrentSheetStyles');
+  stylesMenu.addItem('Сбросить стили (текущий)', 'resetCurrentSheetStyles');
+  stylesMenu.addSeparator();
+  stylesMenu.addItem('Обрезать пустые строки/столбцы', 'cleanupWorkbook_');
   menu.addSubMenu(stylesMenu);
   
-  // Управление бэкапами и диагностика
-  const backupMenu = ui.createMenu('🛠 Maintenance');
-  backupMenu.addItem('Cleanup old backups', 'cleanupBackupsPrompt');
-  backupMenu.addItem('Cleanup backup named ranges', 'cleanupBackupNamedRanges');
-  backupMenu.addItem('⚠️ Force migration reset', 'forceMigrationReset');
-  menu.addSubMenu(backupMenu);
+  // ===== ПОДМЕНЮ: ДИАГНОСТИКА =====
+  const diagMenu = ui.createMenu('🔍 Диагностика');
+  diagMenu.addItem('Проверить валидации', 'diagnoseValidations_');
+  diagMenu.addItem('Отчёт о миграции', 'showMigrationReport_');
+  menu.addSubMenu(diagMenu);
   
-  // Информация
-  menu.addItem('About', 'showAbout_');
+  // ===== МИГРАЦИЯ (если нужна) =====
+  if (needsMigration()) {
+    menu.addSeparator();
+    menu.addItem('🔄 Миграция v1 → v2', 'migrateToV2Prompt');
+  }
+  
+  // ===== ПОДМЕНЮ: ОБСЛУЖИВАНИЕ =====
+  const maintMenu = ui.createMenu('🛠 Обслуживание');
+  maintMenu.addItem('Очистить старые бэкапы', 'cleanupBackupsPrompt');
+  maintMenu.addItem('Очистить именованные диапазоны бэкапов', 'cleanupBackupNamedRanges');
+  maintMenu.addSeparator();
+  maintMenu.addItem('⚠️ Сбросить статус миграции', 'forceMigrationReset');
+  menu.addSubMenu(maintMenu);
+  
+  menu.addSeparator();
+  menu.addItem('ℹ️ О программе', 'showAbout_');
   
   menu.addToUi();
 }
@@ -88,70 +90,7 @@ function showAbout_() {
   );
 }
 
-/**
- * Показывает быструю справку
- */
-function showQuickHelp_() {
-  const ui = SpreadsheetApp.getUi();
-  const help = `
-Быстрый старт:
-1. Funds → Setup / Rebuild structure
-2. Заполните «Семьи» (Активен=Да)
-3. Добавьте «Цели» (Статус=Открыта)
-4. Настройте «Участие» при необходимости
-5. Вносите «Платежи»
-6. Смотрите «Баланс» и «Детализация»
-
-Режимы начисления:
-• static_per_family — фикс на семью
-• shared_total_all — делим на всех участников
-• shared_total_by_payers — делим между оплатившими
-• dynamic_by_payers — water-filling
-• proportional_by_payers — пропорционально платежам
-• unit_price — поштучно
-• voluntary — добровольно (v2.0)
-
-Баланс v2.0:
-Внесено - Списано - Резерв = Свободно
-`;
-  ui.alert('Quick Help', help, ui.ButtonSet.OK);
-}
-
-/**
- * Показывает быструю проверку баланса семьи
- */
-function showQuickBalanceCheck_() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt(
-    'Quick Balance Check',
-    'Введите family_id (например, F001):',
-    ui.ButtonSet.OK_CANCEL
-  );
-  
-  if (response.getSelectedButton() !== ui.Button.OK) return;
-  
-  const familyId = response.getResponseText().trim();
-  if (!familyId) return;
-  
-  try {
-    const paid = PAYED_TOTAL_FAMILY(familyId);
-    const accrued = ACCRUED_FAMILY(familyId, 'ALL');
-    const free = Math.max(0, paid - accrued);
-    const debt = Math.max(0, accrued - paid);
-    
-    const msg = `
-Семья: ${familyId}
-
-Внесено всего: ${paid.toFixed(2)} ₽
-Списано (начислено): ${accrued.toFixed(2)} ₽
-Свободный остаток: ${free.toFixed(2)} ₽
-Задолженность: ${debt.toFixed(2)} ₽
-`;
-    ui.alert('Balance Check', msg, ui.ButtonSet.OK);
-  } catch (e) {
-    ui.alert('Ошибка', e.message, ui.ButtonSet.OK);
-  }
-}
+// showQuickHelp_() и showQuickBalanceCheck_() определены в dialogs.js
 
 /**
  * Диагностика валидаций — показывает какие правила установлены на каких листах

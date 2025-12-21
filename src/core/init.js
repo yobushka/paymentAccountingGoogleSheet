@@ -44,6 +44,7 @@ function init() {
   setupNamedRanges_();
   rebuildValidations();
   setupBalanceExamples();
+  setupBudgetSheet_();
   addHeaderNotes_();
   styleWorkbook_();
   

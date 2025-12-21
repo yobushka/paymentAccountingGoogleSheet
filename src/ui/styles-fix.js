@@ -352,10 +352,24 @@ function applyGoalsStyles_(sh, lastRow) {
   const map = getHeaderMap_(sh);
   const rules = [];
   
-  // Числовые форматы
-  ['Параметр суммы', 'Фиксированный x', 'Возмещено'].forEach(h => {
+  // Текстовые форматы для текстовых колонок (сброс неправильных форматов)
+  ['Статья', 'Подстатья', 'Начисление', 'Статус', 'Тип', 'Периодичность', 'Комментарий'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('@');
+    }
+  });
+  
+  // Числовые форматы для сумм
+  ['Параметр суммы', 'Фиксированный x', 'К выдаче детям', 'Возмещено'].forEach(h => {
     if (map[h]) {
       sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('#,##0.00');
+    }
+  });
+  
+  // Форматы дат
+  ['Дата начала', 'Дедлайн', 'Дата чека'].forEach(h => {
+    if (map[h]) {
+      sh.getRange(2, map[h], lastRow - 1, 1).setNumberFormat('yyyy-mm-dd');
     }
   });
   

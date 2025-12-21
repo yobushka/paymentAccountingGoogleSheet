@@ -181,9 +181,17 @@ function readFamilies_(sh) {
     const memberFromRaw = r[idx['Членство с']];
     const memberToRaw = r[idx['Членство по']];
     
+    // Гибкая проверка активности: Да, да, TRUE, true, 1, пусто (по умолчанию активен)
+    const activeRaw = r[idx['Активен']];
+    const activeStr = String(activeRaw || '').trim().toLowerCase();
+    const isActive = activeRaw === true || activeRaw === 1 || 
+                     activeStr === 'да' || activeStr === 'true' || activeStr === '1' ||
+                     activeStr === '' || activeStr === ACTIVE_STATUS.YES.toLowerCase() ||
+                     (activeStr !== 'нет' && activeStr !== 'false' && activeStr !== '0' && activeStr !== ACTIVE_STATUS.NO.toLowerCase());
+    
     families.set(id, {
       name: String(r[idx['Ребёнок ФИО']] || '').trim(),
-      active: String(r[idx['Активен']] || '').trim() === ACTIVE_STATUS.YES,
+      active: isActive,
       memberFrom: parseDate_(memberFromRaw),
       memberTo: parseDate_(memberToRaw)
     });
@@ -491,6 +499,11 @@ function calculateAccrual_(fid, goal, participants, goalPayments, x, kPayers) {
     case ACCRUAL_MODES.VOLUNTARY:
       // Добровольный взнос: начисление = 0, деньги остаются на балансе
       return 0;
+      
+    case ACCRUAL_MODES.FROM_BALANCE:
+      // Списание с баланса: делим сумму цели поровну между участниками
+      // Не зависит от платежей — списывается с общего баланса семьи
+      return (n > 0 && participants.has(fid)) ? (goal.T / n) : 0;
       
     default:
       return 0;

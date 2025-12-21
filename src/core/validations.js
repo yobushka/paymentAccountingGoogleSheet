@@ -12,6 +12,9 @@ function rebuildValidations() {
   
   Logger.log('Rebuilding validations. Detected version: ' + version);
   
+  // Сначала обновляем лист Lists с формулами для выпадающих списков
+  setupListsSheet();
+  
   const lists = {
     // v2.0 статусы целей
     goalStatus: [GOAL_STATUS.OPEN, GOAL_STATUS.CLOSED, GOAL_STATUS.CANCELLED],
@@ -26,7 +29,8 @@ function rebuildValidations() {
       ACCRUAL_MODES.DYNAMIC_BY_PAYERS,
       ACCRUAL_MODES.PROPORTIONAL_BY_PAYERS,
       ACCRUAL_MODES.UNIT_PRICE,
-      ACCRUAL_MODES.VOLUNTARY
+      ACCRUAL_MODES.VOLUNTARY,
+      ACCRUAL_MODES.FROM_BALANCE
     ],
     goalTypes: [GOAL_TYPES.ONE_TIME, GOAL_TYPES.REGULAR],
     periodicity: [GOAL_PERIODICITY.MONTHLY, GOAL_PERIODICITY.QUARTERLY, GOAL_PERIODICITY.YEARLY],
@@ -121,6 +125,16 @@ function setupGoalsValidations_(ss, lists) {
   if (map['Периодичность']) {
     clearCol(map['Периодичность'], 'Периодичность');
     setValidationList_(sh, 2, map['Периодичность'], lists.periodicity);
+  }
+  
+  // Статья и Подстатья — из листа Смета через Lists (колонки G и I с промежутками)
+  if (map['Статья']) {
+    clearCol(map['Статья'], 'Статья');
+    setValidationFromRange_(sh, 2, map['Статья'], 'Lists!G2:G');
+  }
+  if (map['Подстатья']) {
+    clearCol(map['Подстатья'], 'Подстатья');
+    setValidationFromRange_(sh, 2, map['Подстатья'], 'Lists!I2:I');
   }
   
   Logger.log('Validations for "Цели" completed.');
@@ -268,6 +282,27 @@ function setValidationList_(sh, rowStart, col, values) {
     .setAllowInvalid(false)
     .build();
   sh.getRange(rowStart, col, sh.getMaxRows() - rowStart + 1, 1).setDataValidation(rule);
+}
+
+/**
+ * Устанавливает валидацию по ссылке на диапазон (например 'Lists!E2:E')
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {number} rowStart
+ * @param {number} col
+ * @param {string} rangeA1 — A1-нотация диапазона (например 'Lists!E2:E')
+ */
+function setValidationFromRange_(sh, rowStart, col, rangeA1) {
+  const ss = SpreadsheetApp.getActive();
+  try {
+    const sourceRange = ss.getRange(rangeA1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(sourceRange, true)
+      .setAllowInvalid(true) // Разрешаем пустые и свободный ввод
+      .build();
+    sh.getRange(rowStart, col, sh.getMaxRows() - rowStart + 1, 1).setDataValidation(rule);
+  } catch (e) {
+    Logger.log('Error setting validation from range ' + rangeA1 + ': ' + e.message);
+  }
 }
 
 /**

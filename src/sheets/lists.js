@@ -7,8 +7,19 @@
  */
 function setupListsSheet() {
   const ss = SpreadsheetApp.getActive();
-  const sh = ss.getSheetByName(SHEET_NAMES.LISTS);
-  if (!sh) return;
+  let sh = ss.getSheetByName(SHEET_NAMES.LISTS);
+  
+  // Полная очистка листа Lists для избежания конфликтов формул
+  if (sh) {
+    sh.clear();
+    sh.clearFormats();
+    // Удаляем валидации вручную для всего диапазона данных
+    const lastRow = Math.max(sh.getMaxRows(), 100);
+    const lastCol = Math.max(sh.getMaxColumns(), 15);
+    sh.getRange(1, 1, lastRow, lastCol).clearDataValidations();
+  } else {
+    sh = ss.insertSheet(SHEET_NAMES.LISTS);
+  }
   
   const version = detectVersion();
   
@@ -66,6 +77,21 @@ function setupListsSheetV2_(sh, ss) {
   sh.getRange('D2').setFormula(
     `=IFERROR(FILTER(ARRAYFORMULA(Семьи!${fNameCol}2:${fNameCol} & " (" & Семьи!${fIdCol}2:${fIdCol} & ")"), LEN(Семьи!${fIdCol}2:${fIdCol})),)`
   );
+  
+  // G: BUDGET_ARTICLES — уникальные статьи из Сметы (пропускаем E-F для избежания конфликта)
+  const shB = ss.getSheetByName(SHEET_NAMES.BUDGET);
+  if (shB) {
+    sh.getRange('G1').setValue('BUDGET_ARTICLES');
+    sh.getRange('G2').setFormula(
+      `=IFERROR(UNIQUE(FILTER(Смета!A2:A, LEN(Смета!A2:A))),)`
+    );
+    
+    // I: BUDGET_SUBARTICLES — уникальные подстатьи из Сметы (пропускаем H)
+    sh.getRange('I1').setValue('BUDGET_SUBARTICLES');
+    sh.getRange('I2').setFormula(
+      `=IFERROR(UNIQUE(FILTER(Смета!B2:B, LEN(Смета!B2:B))),)`
+    );
+  }
 }
 
 /**
