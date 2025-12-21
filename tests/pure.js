@@ -80,6 +80,7 @@ export const ACCRUAL_MODES = {
   PROPORTIONAL_BY_PAYERS: 'proportional_by_payers',
   UNIT_PRICE: 'unit_price',
   VOLUNTARY: 'voluntary',
+  FROM_BALANCE: 'from_balance',
 };
 
 /**
@@ -129,6 +130,10 @@ export function calculateAccrual(fid, goal, participants, goalPayments, x, kPaye
     case ACCRUAL_MODES.VOLUNTARY:
       // Добровольный взнос: начисление = 0, деньги остаются на балансе
       return 0;
+
+    case ACCRUAL_MODES.FROM_BALANCE:
+      // Списание с баланса: сумма цели делится поровну между всеми участниками
+      return (n > 0 && participants.has(fid)) ? (goal.T / n) : 0;
 
     default:
       return 0;

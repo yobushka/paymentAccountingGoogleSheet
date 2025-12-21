@@ -38,6 +38,7 @@ const BUILD_ORDER = [
   'src/sheets/balance.js',
   'src/sheets/detail.js',
   'src/sheets/summary.js',
+  'src/sheets/budget.js',
   'src/sheets/issue-status.js',
   
   // 5. Core — основная логика
